@@ -1,15 +1,13 @@
 import apiList from './apiList';
 import Storage from './Storage';
-import { getQueryFromUrl } from './stringHelper';
+import {getQueryFromUrl, handleLyric} from './stringHelper';
 import downReq from './download';
 import timer from './timer';
 import axios from 'axios';
-import idMap from './idMap';
-import $ from 'jquery';
 
 axios.interceptors.response.use(data=> {
 //==============  所有请求完成后都要执行的操作  ==================
-  if (data.status && data.status == 200 && data.data.status == 'error') {
+  if (data.status && data.status == 200 && data.data && data.data.status == 'error') {
     return;
   }
   return data;
@@ -17,16 +15,6 @@ axios.interceptors.response.use(data=> {
   const url = err.config && err.config.url;
   if (!url) {
     return { code: 500 };
-  }
-  if (url.indexOf('/api/playlist/tracks') > -1 || url.indexOf('/api/like' > -1)) {
-    switch (err.response.data.code) {
-      case 502:
-        return window.VUE_APP.$message.warning('歌曲已存在');
-      case 401:
-      case 512:
-        return;
-        // return window.VUE_APP.$message.error('大概是歌曲下线了');
-    }
   }
   if (url.indexOf('/api/login/status') > -1) {
     return Promise.reject({});
@@ -40,21 +28,27 @@ axios.interceptors.response.use(data=> {
   return Promise.reject(err.response.data);
 });
 
-const request = (param) => {
+const request = (param, platform) => {
   let obj = param;
   if (typeof param === 'string') {
     obj = { api: param };
   }
   const { method = 'get', api, data = {} } = obj;
   data._t = param.cache ? 0 : new Date().getTime();
+  data._p = data._p || platform;
   let url =  apiList[api];
   if (method === 'get') {
     url += `?${Object.keys(data).map((k) => `${k}=${encodeURI(data[k])}`).join('&')}`
+  } else {
+    url += '?_t=' + data._t;
   }
   return axios({
     method,
     url: '' + url,
     data,
+    headers: {
+      'Host-Check': btoa(timer().str('YYYYMMDD')),
+    }
   }).then((res) => {
     res.data = res.data || {};
     if (res.data.code === 200 || res.data.result === 100) {
@@ -71,240 +65,146 @@ const request = (param) => {
   });
 };
 
-// 获取歌单列表
-export const getPlayList = async (id) => request({ api: 'LIST_DETAIL', data: { id }})
-  .then(async (res) => {
-    const { playlist } = res;
-    const VUE_APP = window.VUE_APP;
-    const store = VUE_APP.$store;
-    const dispatch = store.dispatch;
-    const allSongs = store.getters.getAllSongs;
-    const userList = store.getters.getUserList;
-    const isFav = String(id) === String(userList.favId);
-    const { tracks } = playlist;
-
-    // 请求的太多的话返回的会不详细
-    const favMap = {};
-    const songs = await handleSongs(tracks);
-    const songIds = songs.map((s) => {
-      isFav && (favMap[s.id] = 1);
-      return s.id
-    });
-    isFav && dispatch('updateFavSongMap', { 163: favMap });
-    dispatch('query163List', { songs: songIds, listId: id });
-
-    return res;
-  });
-
-// 获取qq音乐歌单列表
-export const getQQPlayList = async (id) => request({ api: 'QQ_LIST_DETAIL', data: { id }})
-  .then(async (res) => {
-    const VUE_APP = window.VUE_APP;
-    const dispatch = VUE_APP.$store.dispatch;
-    const allSongs = VUE_APP.$store.getters.getAllSongs;
-    const newSongObj = {};
-    const ids = [];
-    const isFav = String(id) === String(VUE_APP.$store.getters.getQUserList.favId);
-    const favMap = {};
-    const songs = res.data.songlist.map((item) => {
-      const obj = {
-        ...QQ2163(item),
-        ...(allSongs[item.songmid] || {}),
-      };
-      isFav && (favMap[item.songmid] = 1);
-      if (!obj.url) {
-        ids.push(obj.id);
-      }
-      newSongObj[obj.id] = obj;
-      return obj.id;
-    });
-
-    dispatch('query163List', { songs, listId: `qq${id}` });
-    dispatch('updateAllSongs', newSongObj);
-    isFav && dispatch('updateFavSongMap', { qq: favMap });
-    while (ids.length > 0) {
-      getQQUrls(ids.splice(-100));
-    }
-    return res.data;
-  });
-
-export const getMiguPlayList = async (id, pageno) => {
-  try {
-    const { data } = await request({
-      api: 'MIGU_PLAYLIST',
-      data: { id, pageno },
-    });
-    data.list = handleMiguSongs(data.list || []);
-    return data;
-  } catch {
-    return {
-      list: [],
-      total: 0,
-    }
-  }
-};
-
-// 批量获取歌曲的url
-const querySongUrl = (id) => request({
-  api: 'SONG_URL',
-  data: { id },
-  cache: true,
-}).then(({ data }) => {
-  const VUE_APP = window.VUE_APP;
-  const allSongs = VUE_APP.$store.getters.getAllSongs;
-  const dispatch = VUE_APP.$store.dispatch;
-
-  const obj = {};
-  const arr = [];
-  const qqFinds = {};
-  data.forEach((s) => {
-    if (!s.url || s.fee === 1) {
-      const song = allSongs[s.id];
-      qqFinds[s.id] = `${song.name.replace(/\(|\)|（|）/g, ' ')} ${song.ar.map((a) => a.name).join(' ')}`
-    }
-    if (idMap[s.id]) {
-      const { murl, guid, vkey } = Storage.get(['murl', 'guid', 'vkey']);
-      obj[s.id] = {
-        ...allSongs[s.id],
-        br: 128000,
-        qqId: idMap[s.id],
-        // url: `${murl}M500${idMap[id]}.mp3?guid=${guid}&vkey=${vkey}&fromtag=8&uin=0`
-      };
-      getQQUrls([idMap[s.id]], s.id);
-    }
-    obj[s.id] = { ...allSongs[s.id], br: s.br, url: s.url }
-  });
-  if (Object.keys(qqFinds).length) {
-    request({
-      api: 'QQ_SONG_FINDS',
-      method: 'post',
-      data: {
-        data: qqFinds,
-      }
-    }).then((res) => {
-      const newObj = {};
-      Object.keys(res.data).forEach((id) => {
-        newObj[id] = {
-          ...allSongs[id],
-          url: res.data[id].url,
-          qqId: res.data[id].songmid,
-          br: 128000,
-        };
-      });
-      dispatch('updateAllSongs', newObj);
-    });
-  }
-  dispatch('updateAllSongs', obj);
-  return {
-    songs: obj,
-    id,
-  }
-});
-
 // 登录状态
 export const loginStatus = async () => {
   const VUE_APP = window.VUE_APP;
   const dispatch = VUE_APP.$store.dispatch;
-  const { shareId, shareCid, from } = getQueryFromUrl();
+  const { shareId, shareCid, from = '163' } = getQueryFromUrl();
 
-  getQQInfo(true);
+  getQQInfo();
 
   // 包含分享过来的歌曲
   if (shareId) {
-    if (from === 'qq') {
-      request({
-        api: 'QQ_SONG_DETAIL',
-        data: { songmid: shareId }
-      }).then((res) => {
-        handleQQSongs([res.data.track_info]);
+    request({
+      api: 'SONG_INFO',
+      data: { id: shareId, cid: shareCid, _p: from }
+    }).then(({ data }) => handleSongs([ data ]))
+      .then((list) => {
         const allSongs = VUE_APP.$store.getters.getAllSongs;
-        dispatch('updatePlayNow', allSongs[shareId]);
-        dispatch('updatePlayingList', { list: [ shareId ] });
+        list[0] && dispatch('updatePlayNow', allSongs[list[0]]);
+        dispatch('updatePlayingList', { list });
       })
-    } else if (from === 'migu') {
-      request({
-        api: 'MIGU_SONG_INFO',
-        data: { id: shareId.replace('migu_', ''), cid: shareCid }
-      }).then((res) => {
-        const ids = handleMiguSongs([res.data]);
-        const allSongs = VUE_APP.$store.getters.getAllSongs;
-        dispatch('updatePlayNow', allSongs[ids[0]]);
-        dispatch('updatePlayingList', { list: ids });
-      })
-    } else {
-      getSongsDetail(shareId)
-        .then(() => {
-          const allSongs = VUE_APP.$store.getters.getAllSongs;
-          dispatch('updatePlayNow', allSongs[shareId]);
-          dispatch('updatePlayingList', { list: [ shareId ] });
-        })
-    }
   }
 
   // 查询登录情况
   const res = await request('LOGIN_STATUS');
-  if (!res) {
-    // 没有登录的情况
-    request('RECOMMEND_LIST')
-      .then(({ result }) => {
-        const listObj = {};
-        const list = result.map((item) => {
-          const { id, name = '', picUrl, trackCount, playCount } = item;
-          listObj[item.id] = { id, name, trackCount, coverImgUrl: picUrl, playCount };
-          return listObj[item.id];
-        });
-        dispatch('setRecommendList', { list, obj: listObj });
-        getPlayList(list[0].id)
-          .then(({ privileges }) => {
-            const allSongs = VUE_APP.$store.getters.getAllSongs;
-            const idList = privileges.map((s) => s.id);
-            // 默认播放
-            if (!shareId) {
-              dispatch('updatePlayNow', allSongs[privileges[0].id]);
-            } else {
-              idList.unshift(shareId);
-            }
-            dispatch('updatePlayingList', { list: idList, id: list[0].id });
-          })
-      });
-    return;
+  let uid;
+  // 根据是否登陆选择日推还是推荐歌单
+  let func = () => (
+    request({
+      api: 'RECOMMEND_PLAYLIST',
+      data: { login: 0, _p: 163 },
+    }).then(({ data }) => data[0] && getPlaylist(data[0].id, '163'))
+  );
+  if (res) {
+    dispatch('setUser', res.profile);
+    uid = res.profile.userId;
+    func = () => getDaily('163');
+    Storage.set('uid', uid);
   }
-  dispatch('setUser', res.profile);
-  const uid = res.profile.userId;
-  Storage.set('uid', uid);
 
-  // 获取日推
-  request('DAILY_RECOMMEND_SONGS')
-    .then(({ recommend }) => {
-      handleSongs(recommend);
-      const songs = recommend.map((item) => item.id);
-      dispatch('query163List', { songs, listId: 'daily' });
+  let { songs: list, listId, id } = await func();
+  const allSongs = VUE_APP.$store.getters.getAllSongs;
+  if (!shareId) {
+    dispatch('updatePlayNow', allSongs[list[0]]);
+  } else {
+    list.unshift(shareId);
+  }
+  dispatch('updatePlayingList', { list, listId });
 
-      const allSongs = VUE_APP.$store.getters.getAllSongs;
-      // 默认播放日推
-      if (!shareId) {
-        dispatch('updatePlayNow', allSongs[songs[0]]);
-      } else {
-        songs.unshift(shareId);
-      }
-      dispatch('updatePlayingList', { list: songs, id: 'daily' });
-    });
-
-  // 日推歌单
-  request('DAILY_RECOMMEND_LIST')
-    .then(({ recommend }) => {
-      const listObj = {};
-      const list = recommend.map((item) => {
-        const { id, name = '', picUrl, trackCount, creator, playCount } = item;
-        listObj[item.id] = { id, name, trackCount, coverImgUrl: picUrl, creator, playCount };
-        return listObj[item.id];
-      });
-      dispatch('setRecommendList', { list, obj: listObj });
-    });
-
-  // 获取歌单列表
-  getMyList(uid, true);
+  if (res) {
+    const { listIds } = await getUserList(uid, '163');
+    listIds[0] && getPlaylist(listIds[0], '163');
+  }
 };
+
+// 获取日推
+export const getDaily = async (platform, retry) => {
+  const VUE_APP = window.VUE_APP;
+  const dispatch = VUE_APP.$store.dispatch;
+
+  try {
+    const res = await request('DAILY_PLAYLIST', platform);
+    if (!res.data) {
+      if (!retry) {
+        getDaily(platform, true);
+      }
+      return;
+    }
+    const listInfo = {
+      songs: await handleSongs(res.data),
+      listId: `${platform}_daily`
+    }
+    dispatch('updateList', listInfo);
+    return listInfo;
+  } catch (err) {
+    console.log('获取日推失败 =。=', err);
+    return {
+      songs: [],
+      listId: `${platform}_daily`,
+    }
+  }
+}
+
+// 获取用户歌单
+export const getUserList = async (id, platform) => {
+  let myId = '', ownCookie = 0;
+  switch (platform) {
+    case '163':
+      myId = Storage.get('uid');
+      break;
+    case 'qq':
+      let uin = document.cookie.match(/\suin=([^;]+)(;|$)/);
+      ownCookie = Storage.get('haveQCookie') || '0';
+      myId = uin ? uin[1] : '';
+      break;
+  }
+  const isMe = String(myId) === String(id);
+  const userList = VUE_APP.$store.getters.getUserList;
+  const dispatch = VUE_APP.$store.dispatch;
+
+  const { data } = await request({
+    api: 'USER_PLAYLIST',
+    data: {
+      ownCookie,
+      id,
+      _p: platform,
+    }
+  });
+  const mineMap = {}, subMap = {};
+  if (isMe) {
+    userList[platform] = {
+      list: [],
+      favId: '',
+      favAId: '',
+      mine: {},
+      sub: {},
+      obj: {},
+    };
+  }
+  const listIds = data.map((p) => {
+    if (isMe) {
+      // 关注列表
+      userList[platform].obj[p.listId] = p;
+      subMap[p.listId] = 1;
+    }
+    if (String(p.userId) === myId) {
+      // 如果是用户自己创建的，就从关注列表上去掉
+      mineMap[p.listId] = 1;
+      delete subMap[p.listId];
+    }
+    return p.listId;
+  });
+  if (isMe && data[0]) {
+    userList[platform].list = listIds;
+    userList[platform].favId = data[0].id;
+    userList[platform].favListId = listIds[0];
+    userList[platform].mine = mineMap;
+    userList[platform].sub = subMap;
+    dispatch('setUserList', { ...userList });
+  }
+  return { list: data, listIds };
+}
 
 // 校验 Cookie 是否过期
 export const checkCookie = async () => {
@@ -338,7 +238,7 @@ export const checkCookie = async () => {
 };
 
 // 初始化获取qq音乐歌单、喜欢的歌曲等信息
-export const getQQInfo = async (getFav) => {
+export const getQQInfo = async () => {
   const id = Storage.get('qqId');
   if (!id) {
     Storage.set('haveQCookie', '0');
@@ -347,244 +247,41 @@ export const getQQInfo = async (getFav) => {
   const haveCookie = await checkCookie();
   const dispatch = window.VUE_APP.$store.dispatch;
   if (haveCookie.success && haveCookie.data.data) {
-    dispatch('updateFavSongMap', { qq: haveCookie.data.data.mid || {} });
+    const dataMap = {};
+    Object.keys(haveCookie.data.data.mid || {}).forEach((k) => dataMap[`qq_${k}`] = 1);
+    dispatch('updateFavSongMap', { qq: dataMap });
+    getDaily('qq');
   }
-  getQQUserSonglist(id);
+  getUserList(id, 'qq');
 };
 
-// 获取qq用户歌单
-export const getQQUserSonglist = async (id) => {
-  const res = await request({
-    api: 'QQ_USER_SONG_LIST',
+export const getPlaylist = async (id, platform) => {
+  const dispatch = VUE_APP.$store.dispatch;
+  const userList = VUE_APP.$store.getters.getUserList;
+  const myId = {
+    163: Storage.get('uid'),
+    qq: Storage.get('qqId'),
+  }[platform]
+  id = String(id).replace(`${platform}_`, '');
+  const { data = {} } = await request({
+    api: 'PLAYLIST',
     data: {
       id,
-      ownCookie: Number(Storage.get('haveQCookie') === '1'),
+      _p: platform,
     }
   });
-  const res2 = await request({
-    api: 'QQ_COLLECTED_SONGLIST',
-    data: { id }
-  });
-  const qUserList = {
-    list: [],
-    obj: {},
-  };
-  res.data.list.forEach((k) => {
-    if (!k.tid) {
-      return;
-    }
-    const obj = {
-      id: k.tid,
-      dirid: k.dirid,
-      name: k.diss_name,
-      coverImgUrl: k.diss_cover,
-      trackCount: k.song_cnt,
-      creator: {
-        id,
-      },
-      from: 'qq',
-    };
-    if (k.dirid === 201) {
-      qUserList.favId = k.tid;
-    }
-    qUserList.list.push(obj);
-    qUserList.obj[k.tid] = obj;
-  });
-  res2.data.list.forEach(({ dissid, dissname, songnum, listennum, nickname, uin, logo }) => {
-    const obj = {
-      id: dissid,
-      name: dissname,
-      coverImgUrl: logo,
-      trackCount: songnum,
-      playCount: listennum,
-      creator: {
-        id: uin,
-        nickname,
-      },
-      subscribed: true,
-      from: 'qq',
-    };
-    qUserList.list.push(obj);
-    qUserList.obj[dissid] = obj;
-  });
-  window.VUE_APP.$store.dispatch('updateQUserList', qUserList);
-};
 
-// 获取我的歌单列表
-export const getMyList = async (uid = Storage.get('uid'), getFav, id) => {
-  const { playlist } = await request({ api: 'USER_LIST', data: { uid }});
-  const listObj = {};
-  const list = playlist.map((item) => {
-    const { id, name = '', coverImgUrl, trackCount, subscribed, creator, playCount } = item;
-    listObj[item.id] = { id, name, trackCount, coverImgUrl, subscribed, creator, playCount };
-    return listObj[item.id];
-  });
-  window.VUE_APP.$store.dispatch('setUserList', { list, obj: listObj, favId: list[0].id });
+  const songMap = {};
+  data.songs = await handleSongs(data.list || [], (s) => songMap[s.aId] = 1);
+  data.listId = `${platform}_${id}`;
 
-  // 获取我喜欢的歌单
-  getFav && getPlayList(playlist[0].id, true);
-  id && getPlayList(id);
-};
-
-// 咪咕搜索请求
-const searchMiguReq = async ({ keywords: keyword, type, pageNo: page }) => {
-  const VUE_APP = window.VUE_APP;
-  const dispatch = VUE_APP.$store.dispatch;
-  const search = VUE_APP.$store.getters.getSearch;
-  const allSongs = VUE_APP.$store.getters.getAllSongs;
-  if (page > (search.totalPage || 1)) {
-    return;
+  // 是喜欢的列表
+  if (userList[platform] && userList[platform].favListId === data.listId) {
+    dispatch('updateFavSongMap', { [platform]: songMap });
   }
-  const obj = {
-    1: {
-      type: 'song',
-      key: 'songs',
-      total: 'total',
-    },
-    10: {
-      type: 'album',
-      key: 'albums',
-      total: 'total',
-    },
-    100: {
-      type: 'singer',
-      key: 'artists',
-      total: 'artistCount',
-    },
-    1000: {
-      type: 'playlist',
-      key: 'playlists'
-    }
-  }[type];
-  const res = await request({
-    api: 'MIGU_SEARCH',
-    data: {
-      type: obj.type,
-      pageno: page,
-      keyword,
-    }
-  });
-  const resultList = [];
-  const querySongIds = [];
-  const { list, totalPage } = res.data;
-  switch (obj.type) {
-    case 'song':
-      const newObj = {};
-      list.forEach((o) => {
-        const obj = migu2163(o);
-        if (!allSongs[obj.id]) {
-          newObj[obj.id] = {
-            ...allSongs[obj.id],
-            ...obj,
-          };
-          querySongIds.push({ id: obj.miguId, cid: obj.cid, url: obj.url });
-        }
-        resultList.push(obj.id);
-      });
-      dispatch('updateAllSongs', newObj);
-      break;
-    case 'singer':
-      list.forEach((item) => {
-        item.picUrl = item.picUrl || 'http://p3.music.126.net/VnZiScyynLG7atLIZ2YPkw==/18686200114669622.jpg?param=120y120';
-        resultList.push({
-          from: 'migu',
-          ...item,
-        })
-      });
-      break;
-    case 'album':
-      list.forEach((item) => {
-        resultList.push({
-          from: 'migu',
-          id: item.id,
-          name: item.name,
-          picUrl: item.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg?param=300y300',
-        })
-      });
-      break;
-    case 'playlist':
-      list.forEach((item) => {
-        resultList.push({
-          from: 'migu',
-          id: item.id,
-          name: item.name,
-          playCount: item.playCount,
-          trackCount: item.songCount,
-          coverImgUrl: item.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg?param=300y300',
-        })
-      });
-      break;
-    default: break;
-  }
-  if (querySongIds.length > 0) {
-    getMiguUrl(querySongIds);
-  }
-
-  const searchResult = {
-    loading: false,
-  };
-  searchResult[obj.key] = page > 1 ? [...(search[obj.key] || []), ...resultList] : resultList;
-  searchResult.totalPage = totalPage;
-  dispatch('updateSearch', searchResult)
-};
-
-// 获取咪咕音乐的播放链接和专辑封面
-export const getMiguUrl = async (idArr) => {
-  if (idArr.length === 0)
-    return;
-  const VUE_APP = window.VUE_APP;
-  const dispatch = VUE_APP.$store.dispatch;
-  const allSongs = VUE_APP.$store.getters.getAllSongs;
-  const miguUrlInfo = Storage.get('miguUrlInfo', true, '{}');
-  const reqIds = [];
-
-  const newObj = {};
-  idArr.forEach(({ id, cid, url }) => {
-    id = String(id).replace('migu_', '');
-    const uInfo = miguUrlInfo[id];
-    const miguId = `migu_${id}`;
-    if (url || uInfo) {
-      const al = {
-        picUrl: uInfo && uInfo.pic,
-        ...((allSongs[miguId] || {}).al || {}),
-      };
-      al.picUrl = al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg';
-      newObj[miguId] = {
-        ...allSongs[miguId],
-        url: url || uInfo['128k'],
-        br: 128000,
-        al,
-        miguUrl: uInfo,
-      }
-    } else {
-      reqIds.push({ id, cid });
-    }
-  });
-  dispatch('updateAllSongs', newObj);
-  if (reqIds.length > 0) {
-   reqIds.forEach(({ id, cid }) => {
-     request({
-       api: 'MIGU_URL_GET',
-       data: { id, cid, needPic: 1 }
-     }).then((res) => {
-       miguUrlInfo[id] = res.data;
-       Storage.set('miguUrlInfo', miguUrlInfo, true);
-       const song = allSongs[`migu_${id}`];
-       dispatch('updateSongDetail', {
-         ...song,
-         br: 128000,
-         url: res.data['128k'],
-         miguUrl: res.data,
-         al: {
-           ...song.al,
-           picUrl: res.data.pic,
-         }
-       });
-
-     });
-   })
-  }
-};
+  dispatch('updateList', data);
+  return data;
+}
 
 // 搜索请求
 export const searchReq = async ({ keywords, type = 1, pageNo = 1, platform }) => {
@@ -595,307 +292,121 @@ export const searchReq = async ({ keywords, type = 1, pageNo = 1, platform }) =>
     return dispatch('updateSearch', { keywords, type, pageNo, loading: false, songs: [], artists: [], total: 0 });
   }
 
-  if (platform === 'qq')
-    return searchQQReq({ keywords, type, pageNo });
-
-  if (platform === 'migu')
-    return searchMiguReq({ keywords, type, pageNo });
-
-  const allSongs = VUE_APP.$store.getters.getAllSongs;
-  dispatch('updateSearch', { keywords, type, pageNo, loading: true });
-  const res = await request({
-    api: '163_SEARCH',
-    data: {
-      keywords,
-      offset: (pageNo - 1)   * 30,
-      type,
-    },
-    cache: true,
-  });
-  const obj = {};
-  const search = VUE_APP.$store.getters.getSearch;
-  res.result.songs = (res.result.songs || []).map((s) => {
-    if (!allSongs[s.id]) {
-      obj[s.id] = {
-        id: s.id,
-        name: s.name,
-        ar: s.artists || s.ar,
-      };
-    }
-    return s.id;
-  });
-
-  if (pageNo > 1) {
-    res.result.songs = [ ...(search.songs || []), ...(res.result.songs || []) ];
-    res.result.artists = [ ...(search.artists || []), ...(res.result.artists || []) ];
-    res.result.albums = [ ...(search.albums || []), ...(res.result.albums || []) ];
-    res.result.playlists = [ ...(search.playlists || []), ...(res.result.playlists || []) ];
-  }
-  if (search.keywords === keywords) {
-    dispatch('updateSearch', { ...res.result, loading: false, total: res.result.songCount || res.result.artistCount || res.result.playlistCount || res.result.albumCount });
-  }
-  dispatch('updateAllSongs', obj);
-
-  // 如果是搜索歌曲的，且存在没有加入过 allSongs 的歌曲
-  const ids =res.result.songs.join(',');
-  if (!ids) {
-    return;
-  }
-
-  // 获取歌曲的详细信息，搜索到的数据格式和这个接口里的一些字段不一样，而且没有专辑封面这种东西
-  getSongsDetail(ids);
-};
-
-// qq搜索请求
-const searchQQReq = async ({ keywords: key, pageNo, type }) => {
-  const VUE_APP = window.VUE_APP;
-  const dispatch = VUE_APP.$store.dispatch;
-  const allSongs = VUE_APP.$store.getters.getAllSongs;
-  const search = VUE_APP.$store.getters.getSearch;
-  dispatch('updateSearch', { loading: true });
-
-  const obj = {
-    1: {
-      type: 0,
-      key: 'songs',
-      total: 'total',
-    },
-    10: {
-      type: 8,
-      key: 'albums',
-      total: 'total',
-    },
-    100: {
-      type: '9',
-      key: 'artists',
-      total: 'artistCount',
-    },
-    1000: {
-      type: 2,
-      key: 'playlists'
-    }
-  }[type];
-  const res = await request({
-    api: 'QQ_SEARCH',
-    data: {
-      key,
-      t: obj.type,
-      pageNo,
-    }
-  });
-
-  const { list, total, type: strType } = res.data;
-  let resultList = [];
-
-  // 搜索歌曲
-  if (type === 1) {
-    const newObj = {};
-    resultList = list.map((item) => {
-      const songObj = QQ2163(item);
-      newObj[songObj.id] = {
-        ...allSongs[songObj.id],
-        ...songObj,
-      };
-      return songObj.id;
+  try {
+    const { data: { list, key, total }} = await request({
+      api: 'SEARCH',
+      data: {
+        key: keywords,
+        pageNo,
+        type,
+        _p: platform
+      }
     });
-    dispatch('updateAllSongs', newObj);
-    getQQUrls(resultList);
-  }
-
-  // 搜索专辑
-  if (type === 10) {
-    resultList = list.map((item) => ({
-      from: 'qq',
-      id: item.albumID,
-      mid: item.albumMID,
-      name: item.albumName,
-      picUrl: item.albumPic,
-    }))
-  }
-
-  // 搜索歌手
-  if (type === 100) {
-    resultList = list.map((item) => ({
-      from: 'qq',
-      id: item.singerID,
-      mid: item.singerMID,
-      name: item.singerName,
-      picUrl: item.singerPic,
-    }))
-  }
-
-  // 搜索歌单
-  if (type === 1000) {
-    const qUserList = VUE_APP.$store.state.qUserList;
-    resultList = list.map((item) => ({
-      from: 'qq',
-      id: item.dissid,
-      name: item.dissname,
-      creator: item.creator,
-      playCount: item.listennum,
-      trackCount: item.song_count,
-      coverImgUrl: item.imgurl,
-      subscribed: qUserList && qUserList.obj && qUserList.obj[item.dissid],
-    }))
-  }
-
-  const searchResult = {
-    loading: false,
-  };
-  searchResult[obj.key] = pageNo > 1 ? [...(search[obj.key] || []), ...resultList] : resultList;
-  searchResult.total = total;
-  dispatch('updateSearch', searchResult)
-};
-
-export const getSongsDetail = (ids) => (
-  request({
-    api: 'SONG_DETAIL',
-    data: { ids },
-    cache: true,
-  }).then(({ songs }) => handleSongs(songs))
-);
-
-export const QQ2163 = (item) => {
-  const {
-    albumid,
-    albummid,
-    albumname,
-    strMediaMid,
-    singer,
-    songmid,
-    songid,
-    songname,
-    url,
-    vid,
-    cdIdx,
-    pubtime,
-  } = item;
-  return {
-    ar: singer,
-    br: 128000,
-    al: {
-      id: albumid,
-      mid: albummid,
-      name: albumname,
-      picUrl: `https://y.gtimg.cn/music/photo_new/T002R300x300M000${albummid}.jpg`,
-    },
-    mvid: vid,
-    name: songname,
-    id: songmid,
-    mid: songmid,
-    songid,
-    from: 'qq',
-    url,
-    trackNo: cdIdx,
-    publishTime: pubtime * 1000,
-  };
-};
-
-export const migu2163 = ({
-  id,
-  cid,
-  name,
-  artists: ar,
-  url,
-  picUrl = 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg',
-  album: al,
-}) => ({
-  from: 'migu',
-  id: `migu_${id}`,
-  miguId: id,
-  url,
-  cid,
-  ar,
-  al: {
-    picUrl,
-    ...(al || {}),
-  },
-  name,
-  br: 128000,
-});
-
-// 批量处理 咪咕音乐的歌曲信息
-export const handleMiguSongs = (list) => {
-  const allSongs = window.VUE_APP.$store.getters.getAllSongs;
-  const dispatch = window.VUE_APP.$store.dispatch;
-  const obj = {};
-  const getUrlArr = [];
-  const ids = list.map(item => {
-    const newItem = migu2163(item);
-    if (!allSongs[newItem.id]) {
-      obj[newItem.id] = newItem;
-      getUrlArr.push(newItem);
+    const search = VUE_APP.$store.getters.getSearch;
+    if (!Number(type)) {
+      search.list = await handleSongs(list);
+    } else {
+      search.list = list;
     }
-    return newItem.id;
-  });
-  dispatch('updateAllSongs', obj);
-  getMiguUrl(getUrlArr);
-  return ids;
+    (pageNo > 1) && (search.list = [ ...search[`${key}s`], ...search.list ]);
+
+    dispatch('updateSearch', { loading: false, [`${key}s`]: search.list, total });
+  } catch {
+    return VUE_APP.$message.error('搜索出错');
+  }
 };
+
+export const getUrlBatch = async (id, platform) => {
+  const res = await request({
+    api: 'BATCH_URL',
+    method: 'post',
+    data: {
+      id,
+      _p: platform
+    }
+  });
+  const obj = {};
+  const findMap = {};
+  const VUE_APP = window.VUE_APP;
+  const allSongs = VUE_APP.$store.getters.getAllSongs;
+  id.split(',').forEach(v => {
+    const aId = `${platform}_${v}`
+    const song = allSongs[`${platform}_${v}`];
+    if (song) {
+      findMap[aId] = {
+        key: `${song.name.replace(/\(|\)|（|）/g, ' ')} ${song.ar.map((a) => a.name).join(' ')}`,
+        id: aId,
+        duration: song.duration,
+      };
+    }
+  })
+  Object.keys(res.data).forEach((id) => {
+    const aId = `${platform}_${id}`;
+    delete findMap[aId];
+    obj[aId] = {
+      ...allSongs[aId],
+      br: 128000,
+      url: res.data[id],
+      pUrl: res.data[id],
+    }
+  })
+  if (Object.keys(findMap).length > 0) {
+    request({
+      api: 'SONG_FIND',
+      method: 'post',
+      data: {
+        list: Object.values(findMap),
+        _p: platform,
+      }
+    }).then((res) => {
+      const newObj = {};
+      Object.keys(res.data || {}).forEach((id) => {
+        const { url, bId, bPlatform } = res.data[id];
+        newObj[id] = {
+          ...allSongs[id],
+          url,
+          pUrl: url,
+          bId,
+          bPlatform,
+          br: 128000,
+        };
+      });
+      VUE_APP.$store.dispatch('updateAllSongs', newObj);
+    });
+  }
+  VUE_APP.$store.dispatch('updateAllSongs', obj);
+}
 
 // 处理获取到的歌曲，把他们存到 allSongs 并获取链接
-export const handleSongs = (songs, func) => (
+export const handleSongs = (songs = [], func) => (
   new Promise((resolve, reject) => {
     const VUE_APP = window.VUE_APP;
     const obj = {};
     const allSongs = VUE_APP.$store.getters.getAllSongs;
     const ids = [];
+    let platform = ''
     songs.forEach((s) => {
+      const aId = `${s.platform}_${s.id}`;
+      s.aId = aId;
       func && func(s);
-      obj[s.id] = {
-        ...(allSongs[s.id] || {}),
-        al: (s.al || s.album),
-        ar: s.ar || s.artists,
-        name: s.name,
-        id: s.id,
-        mvid: s.mvid || s.mv,
-        trackNo: s.no,
-        publishTime: s.publishTime || (s.al || s.album || {}).publishTime,
-      };
-      allSongs[s.id] = obj[s.id];
-      if (!allSongs[s.id].url) {
-        ids.push(s.id);
+      if (allSongs[aId] && allSongs[aId].url) {
+        return;
       }
+      obj[aId] = s;
+      if ((!allSongs[aId] || !allSongs[aId].url) && !s.url) {
+        ids.push(s.id);
+      } else {
+        s.pUrl = (allSongs[aId] && allSongs[aId].pUrl) || s.url
+      }
+      platform = s.platform;
     });
     VUE_APP.$store.dispatch('updateAllSongs', obj);
     while (ids.length > 0) {
-      querySongUrl(ids.splice(-300).join(','));
+      getUrlBatch(ids.splice(-99).join(','), platform || '163');
     }
-    setTimeout(() => resolve(songs));
+    resolve(songs.map(s => s.aId));
   })
 );
-
-const likeQQMusic = (id) => {
-  const message = VUE_APP.$message;
-  if (Storage.get('haveQCookie') !== '1') {
-    return message.warning('请先前往设置页设置 Cookie');
-  }
-  const store= VUE_APP.$store;
-  const favSongMap = store.getters.getFavSongMap;
-  const allSongs = store.getters.getAllSongs;
-  const like = !Boolean(favSongMap.qq[id]);
-  const data = { dirid: 201, mid: id, id: allSongs[id].songid };
-  const qUserList = store.getters.getQUserList;
-  let api = like ? 'QQ_SONG_LIST_ADD' : 'QQ_SONG_LIST_REMOVE';
-  request({
-    api,
-    data,
-  }).then((res) => {
-    const allList = store.getters.getAllList;
-    let songs = allList[`qq${qUserList.favId}`] || [];
-    if (like) {
-      songs.unshift(id);
-    } else {
-      songs = songs.filter((v) => v !== id);
-    }
-    favSongMap.qq[id] = Number(like);
-    store.dispatch('updateFavSongMap', favSongMap);
-    store.dispatch('query163List', { songs, listId: `qq${qUserList.favId}` });
-    message.success(like ? '爱上！' : '爱过～');
-  }, (err) => {
-    message.error(err.errMsg);
-  })
-};
 
 // 喜欢音乐
 export const likeMusic = (id) => {
@@ -903,139 +414,113 @@ export const likeMusic = (id) => {
   const VUE_APP = window.VUE_APP;
   const message = VUE_APP.$message;
   const store= VUE_APP.$store;
-  const favSongMap = store.getters.getFavSongMap;
-  const allList = store.getters.getAllList;
-  const userList = store.getters.getUserList;
-  const allSongs = store.getters.getAllSongs;
-  if (allSongs[id].from === 'qq') {
-    return likeQQMusic(id);
+  const {
+    getFavSongMap: favSongMap,
+    getAllList: allList,
+    getAllSongs: allSongs,
+    getUserList: userList,
+    getUser: user,
+  } = store.getters;
+
+  const song = allSongs[id];
+  const { mid, songid, id: trueId, platform } = song;
+  const like = !Boolean(favSongMap[platform][id]);
+
+  if (platform === 'migu') {
+    return VUE_APP.$message.error('咪咕音乐暂不支持！');
   }
-  const like = !Boolean(favSongMap['163'][id]);
-  request({
-    api: 'LIKE_MUSIC',
-    data: { id, like },
-  }).then((res) => {
-    if (res && res.code === 200) {
-      const songs = allList[userList.favId];
+
+  let favFunc = () => {
+    const listId = userList[platform].favListId;
+    return request({
+      api: 'PLAYLIST_TRACKS',
+      data: { tracks: trueId, pid: listId.replace(`${platform}_`, ''), op: like ? 'add' : 'del'},
+    }).catch((err) => {
+      if (err.data && err.data.status === 200) {
+        return err.data.body || err.data.data;
+      }
+    })
+  }
+  if (platform === 'qq') {
+    if (Storage.get('haveQCookie') !== '1') {
+      return message.warning('没有 cookie ！');
+    }
+    favFunc = () => {
+      const data = { dirid: 201, mid, id: songid };
+      let api = like ? 'QQ_SONG_LIST_ADD' : 'QQ_SONG_LIST_REMOVE';
+      return request({ api, data });
+    }
+  } else {
+    if (!user.userId) {
+      return message.warning('没有登陆！');
+    }
+  }
+
+  favFunc()
+    .then((res) => {
+      if (platform === '163' && res.code !== 200) {
+        return message.error('失败了！');
+      }
+      const listId = userList[platform].favListId;
+      const songs = allList[listId];
       if (like) {
         message.success('爱上！');
-        songs.unshift(id);
-        favSongMap['163'][id] = 1;
-        store.dispatch('query163List', { songs, listId: userList.favId });
+        favSongMap[platform][id] = 1;
+        if (songs) {
+          songs.unshift(id);
+          store.dispatch('updateList', { songs, listId });
+        }
         store.dispatch('updateFavSongMap', favSongMap);
       } else {
         message.success('爱过～');
-        favSongMap['163'][id] = 0;
-        store.dispatch('query163List', { songs: songs.filter((s) => s !== id), listId: userList.favId });
+        favSongMap[platform][id] = 0;
         store.dispatch('updateFavSongMap', favSongMap);
+        if (songs) {
+          store.dispatch('updateList', { songs: songs.filter((s) => s !== id), listId });
+        }
       }
-      getMyList(Storage.get('uid'), true);
-    } else {
-      // window.VUE_APP.$message.error('大概是歌曲下线了')
-    }
-  }, (err) => {
-    // window.VUE_APP.$message.error('大概是歌曲下线了')
-  })
-};
-
-export const getQQUrls = (arr, sid) => {
-  const id = arr.filter((item) => !!item);
-  request({
-    api: 'QQ_GET_URLS',
-    data: { id },
-  }).then((res) => {
-    const allSongs = window.VUE_APP.$store.getters.getAllSongs;
-    const newObj = {};
-    Object.keys(res.data).forEach((k) => {
-      const song = allSongs[sid || k] || { id: k, from: 'qq', br: 128000, };
-      if (song.url) {
-        return;
-      }
-      song.url = res.data[k];
-      song.br = 128000;
-      song.qqId = k;
-      newObj[song.id] = song;
-    });
-    window.VUE_APP.$store.dispatch('updateAllSongs', newObj);
-  })
+    })
 };
 
 // 获取高品质歌曲的
 export const getHighQualityUrl = async (id, type, updateSong) => {
   const allSongs = VUE_APP.$store.getters.getAllSongs;
-  const song = allSongs[id];
+  const song = allSongs[id] || updateSong || {};
   if (!song.url) {
     return '';
   }
-  let [url, br, songEndType] = ['', song.br, br > 320000 ? 'flac' : 'mp3'];
+  const idStr = (song.bId || id).replace(`${song.platform}_`, '');
 
-  if (song.qqId) {
-    const typeArr = ['flac', '320', '128'];
-    let i = typeArr.indexOf(type);
-    while (i < typeArr.length && !url)  {
-      try {
-        const mediaIdMatch = song.url.match(/(C4|F0|M8|M5|A0)00(.+)\.(m4a|flac|mp3)/);
-        const mediaId = mediaIdMatch ? mediaIdMatch[2] : '';
-        const urlReq = await request({
-          api: 'QQ_DOWN_URL',
-          data: { id: song.qqId, type, mediaId }
-        });
-        if (urlReq.result === 100) {
-          url = urlReq.data;
-          songEndType = {
-            320: 'mp3',
-            128: 'mp3',
-            flac: 'flac',
-          }[type];
-          br = {
-            320: 320000,
-            128: 128000,
-            flac: 960000,
-          }[type];
-        }
-      } catch (err) {
-        // console.error(`获取歌曲高品质链接错误${err.message}`);
+  let url = song.url, br = song.br || 128000, songEndType = 'mp3';
+  try {
+    const res = await request({
+      api: 'SINGLE_URL',
+      data: {
+        id: idStr,
+        mediaId: song.mediaId,
+        br: type,
+        _p: song.bPlatform || song.platform,
       }
-      i += 1;
-      type = typeArr[i];
+    });
+    if (res.data && res.data.url) {
+      url = res.data.url;
+      br = res.data.br;
+      if (br > 320000) {
+        songEndType = 'flac';
+      }
     }
+  } catch (err) {
+    console.log('获取url失败了 =.=', song.id, song.platform);
   }
-  // 别的网站下载会有跨域问题
+
   url = url.replace(/^(.+)qq.com/, 'http://122.226.161.16/amobile.music.tc.qq.com');
+  url = url.replace('freetyst.nf.migu.cn', `${window.location.host}/miguSongs`);
 
-  if (song.miguId) {
-    url = '';
-    const typeArr = ['flac', '320', '128'];
-    const miguUrlInfo = Storage.get('miguUrlInfo', true, '{}');
-    let urlInfo = miguUrlInfo[song.miguId];
-    if (!urlInfo) {
-      urlInfo = await request({
-        api: 'MIGU_URL_GET',
-        data: { id: song.miguId, cid: song.cid }
-      });
-      urlInfo = urlInfo.data;
-    }
-    let i = typeArr.indexOf(type);
-    const tArr = [
-      { end: 'flac', key: 'flac', br: 960000 },
-      { end: 'mp3', key: '320k', br: 320000 },
-      { end: 'mp3', key: '128k', br: 128000 },
-    ];
-    while (i < typeArr.length && !url) {
-      url = urlInfo[tArr[i].key];
-      songEndType = tArr[i].end;
-      br = tArr[i].br;
-    }
-    url = encodeURI(url);
-    // migu 的有跨域问题，所以在服务器上用 nginx 配以下代理
-    url = url.replace('tyst.migu.cn', `${window.location.host}/miguSongs`);
-  }
-
-  url = url || song.url;
   if (updateSong) {
     VUE_APP.$store.dispatch('updateSongDetail', {
       url,
       br,
+      aId: song.aId,
     })
   }
   return {
@@ -1046,23 +531,30 @@ export const getHighQualityUrl = async (id, type, updateSong) => {
 };
 
 // 下载
-export const download = async (id, songName, forceReq) => {
+export const download = async (id, songName, forceReq, defaultSong) => {
   window.event && window.event.stopPropagation();
   const allSongs = VUE_APP.$store.getters.getAllSongs;
-  const song = allSongs[id];
+  const song = defaultSong || allSongs[id];
   const dispatch = VUE_APP.$store.dispatch;
 
   if (!song.url) {
     return VUE_APP.$message.warning('没有这首歌呀');
   }
-  let songCid = song.cid;
+  let songCid = song.cId;
 
-  let { url, songEndType, br } = await getHighQualityUrl(id, Storage.get('downSize') || 'flac');
+  let { url, songEndType, br } = await getHighQualityUrl(id, Storage.get('downSize') || 'flac', song);
 
   const downId = `${new Date().getTime()}${id}`;
-  const name = songName ? songName : `${song.ar.map((a) => a.name).join('、')}-${song.name}.${songEndType}`;
+  if (url.indexOf('.mp3') > -1) {
+    songEndType = 'mp3';
+  } else if (url.indexOf('.flac') > -1) {
+    songEndType = 'flac';
+  }
+  let name = `.${songEndType}`;
+  let { repeatDown, download_info: downloadInfo, downLyric } = Storage.get(['repeatDown', 'download_info', 'downLyric']);
 
-  let { repeatDown, download_info: downloadInfo } = Storage.get(['repeatDown', 'download_info']);
+  name = songName || getDownName(song, name);
+
   downloadInfo = JSON.parse(downloadInfo);
   if (!repeatDown && !forceReq) {
     const song = downloadInfo.list.find((s) => s.songId === id && s.status === 'success');
@@ -1075,12 +567,59 @@ export const download = async (id, songName, forceReq) => {
   downReq(url, name, null, song, {
     init: (ajax) => {
       VUE_APP.$message.success('加入下载中');
-      dispatch('updateDownload', { status: 'init', from: (song.from || '163'), id: downId, ajax, name, songId: id, br, songCid });
+      dispatch('updateDownload', { status: 'init', from: (song.from || '163'), id: downId, ajax, name, songId: id, br, songCid, song, });
     },
-    success: () => dispatch('updateDownload', { status: 'success', id: downId }),
+    success: () => {
+      if (downLyric === '1') {
+        downLyricFunc(song);
+      }
+      dispatch('updateDownload', { status: 'success', id: downId });
+    },
     error: () => dispatch('updateDownload', { status: 'error', id: downId }),
     progress: (p, l, t) => dispatch('updateDownload', { status: 'progress', id: downId, p, l, t }),
   });
+};
+
+export const downLyricFunc = async (obj) => {
+  await queryLyric(obj.aId);
+  const allSongs = VUE_APP.$store.getters.getAllSongs;
+  const song = allSongs[obj.aId] || obj;
+  let lyric = song.rawLyric;
+  if (!lyric) {
+    return;
+  }
+  if (Storage.get('downLyricTrans') === '1' && song.rawTrans) {
+    const lyricArr = lyric.split('\n');
+    const transArr = song.rawTrans.split('\n');
+    const result = [];
+    lyricArr.forEach((str) => {
+      result.push(str);
+      const times = str.match(/\[\d+:\d+.\d+\]/);
+      if (times) {
+        const transStr = transArr.find((v) => v.indexOf(times[0]) > -1);
+        transStr && result.push(transStr);
+      }
+    })
+    lyric = result.join('\n');
+  }
+  downReq(lyric, getDownName(song, '.lrc'));
+}
+
+export const getDownName = (song, end = '') => {
+  let artistName = (song.ar || []).map((a) => a.name).join('/');
+  let name = '';
+  switch (Storage.get('downMusicName')) {
+    case '1':
+      name = `${song.name}-${artistName}${end}`;
+      break;
+    case '2':
+      name = `${song.name}${end}`;
+      break;
+    default:
+      name = `${artistName}-${song.name}${end}`;
+      break;
+  }
+  return name;
 };
 
 export const getPersonFM = () => (
@@ -1116,85 +655,9 @@ export const handleQQComments = (list) => (list || []).map((obj) => ({
   likedCount: obj.praisenum,
 }));
 
-export const handleQQSongs = (list) => {
-  const allSongs = window.VUE_APP.$store.getters.getAllSongs;
-  const obj = {};
-  const ids = [];
-  list.forEach(({ singer, mid, id, name, mv = {}, album, cdIdx, time_public, index_album }) => {
-    if (!allSongs[mid]) {
-      album.picUrl = `https://y.gtimg.cn/music/photo_new/T002R300x300M000${album.mid}.jpg`;
-      obj[mid] = {
-        ar: singer,
-        mid,
-        id: mid,
-        songid: id,
-        name,
-        mvid: mv.vid,
-        from: 'qq',
-        al: album,
-        trackNo: cdIdx || index_album,
-        publishTime: timer(time_public, 'YYYY-MM-DD').time,
-      };
-    }
-    ids.push(mid);
-  });
-
-  window.VUE_APP.$store.dispatch('updateAllSongs', obj);
-
-  getQQUrls(ids);
-  return ids;
-};
-
-export const getMusicData = (url) => {
-  try {
-    if (!url) {
-      return;
-    }
-    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    window.AudioBufferSourceNode = audioCtx.createBufferSource();
-    window.AnalyserNode = audioCtx.createAnalyser();
-    window.musicDataMap = {0: [0]};
-    window.readNewMusic = true;
-    const { AudioBufferSourceNode, AnalyserNode } = window;
-    AnalyserNode.fftSize = Number(Storage.get('drawMusicNum') || 64) * 2;
-    const request = new XMLHttpRequest();
-    request.open('GET', url, true);
-    request.responseType = 'arraybuffer'; // 设置数据类型为arraybuffer
-    request.onload = function() {
-      const audioData = request.response;
-      audioCtx.decodeAudioData(
-        audioData,
-        (buffer) => {
-          AudioBufferSourceNode.buffer = buffer;
-          AudioBufferSourceNode.connect(AnalyserNode);
-          AudioBufferSourceNode.start();
-          window.AnalyserNode = AnalyserNode;
-          window.AudioBufferSourceNode = AudioBufferSourceNode;
-        },
-        (e) => {
-          window.readNewMusic = false;
-          if (VUE_APP.$store.getters.isPlaying) {
-            VUE_APP.$store.dispatch('setReading', false);
-          }
-        });
-    };
-    request.onerror = function () {
-      window.readNewMusic = false;
-      if (VUE_APP.$store.getters.isPlaying) {
-        VUE_APP.$store.dispatch('setReading', false);
-      }
-    };
-    request.send();
-  } catch (err) {
-    window.readNewMusic = false;
-    if (VUE_APP.$store.getters.isPlaying) {
-      VUE_APP.$store.dispatch('setReading', false);
-    }
-  }
-};
-
 // 从服务器获取 Cookie
 export const getCookie = async (id) => {
+  Storage.set('qqId', id);
   const res = await request({
     api: 'QQ_GET_COOKIE',
     data: {
@@ -1212,40 +675,84 @@ export const getCookie = async (id) => {
 };
 
 // 收藏/取消收藏 歌单
-export const collectPlaylist = async (playlist) => {
+export const collectPlaylist = async ({ platform, id, listId }) => {
   window.event.stopPropagation();
-  let result = null;
-  switch (playlist.from) {
+  const userList = VUE_APP.$store.getters.getUserList;
+  if (!userList[platform]) {
+    return VUE_APP.$message.error('未登陆或没有Cookie');
+  }
+  const isSub = Boolean(userList[platform].sub[listId]);
+  let success = false;
+  switch (platform) {
     case 'migu':
       VUE_APP.$message.warning('咪咕音乐暂不支持！');
-      return {};
+      return;
     case 'qq':
       try {
-        result = await request({
+        await request({
           api: 'QQ_COLLECT_SONGLIST',
           data: {
-            id: playlist.id,
-            op: playlist.subscribed ? 2 : 1,
+            id,
+            op: isSub ? 2 : 1,
           }
         });
-        playlist.subscribed = !playlist.subscribed;
-        VUE_APP.$message.success(`${playlist.subscribed ? '' : '取消'}收藏！`);
+        success = true;
       } catch {
-        VUE_APP.$message.error('是不是没有 cookie 啊');
+        return VUE_APP.$message.error('收藏失败');
       }
-      return playlist;
-    default:
-      result = await request({
-        api: 'SUBSCRIBE_PLAYLIST',
-        data: {
-          id: playlist.id,
-          t: Number(!playlist.subscribed),
-        }
-      });
-      playlist.subscribed = !playlist.subscribed;
-      VUE_APP.$message.success(`${playlist.subscribed ? '' : '取消'}收藏！`);
-      return playlist;
+      break;
+    case '163':
+      try {
+        await request({
+          api: 'SUBSCRIBE_PLAYLIST',
+          data: {
+            id,
+            t: Number(!isSub),
+          }
+        });
+        success = true;
+      } catch {
+        return VUE_APP.$message.error('收藏失败');
+      }
+      break;
   }
+
+  if (success) {
+    VUE_APP.$message.success(`${isSub ? '取消' : '收藏'}成功！`);
+    userList[platform].sub[listId] = Number(!isSub);
+    VUE_APP.$store.dispatch('setUserList', { ...userList });
+  }
+
 };
+
+export const queryLyric = async (aId) => {
+  const allSongs = VUE_APP.$store.getters.getAllSongs;
+  const song = allSongs[aId];
+  const { id, mid, cId, platform } = song;
+  if (song.lyricObj) {
+    return;
+  }
+  const { data: { lyric, trans }} = await request({
+    api: 'LYRIC',
+    data: {
+      id: {
+        163: id,
+        qq: mid,
+        migu: cId
+      }[platform],
+      _p: platform,
+    }
+  }).catch(() => ({ data: { lyric: '', trans: '' }}));
+  let lyricObj = {};
+  lyric && handleLyric(lyric, 'str', lyricObj);
+  trans && handleLyric(trans, 'trans', lyricObj);
+  !lyric && !trans && (
+    lyricObj = {
+      0: {
+        str: '没有歌词哟，好好享受',
+      },
+    });
+  VUE_APP.$store.dispatch('updateSongDetail', { lyric: lyricObj, aId, rawLyric: lyric, rawTrans: trans });
+}
 
 export default request;

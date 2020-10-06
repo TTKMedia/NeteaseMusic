@@ -31,6 +31,7 @@
         <p>后端：「网易云」<a href="https://github.com/Binaryify/NeteaseCloudMusicApi" target="_blank">NeteaseCloudMusicApi</a></p>
         <p>后端：「QQ音乐」<a href="https://github.com/jsososo/QQMusicApi" target="_blank">QQMusicApi</a> (也是我的项目，也欢迎支持一下)</p>
         <p>后端：「咪咕音乐」<a href="https://github.com/jsososo/MiguMusicApi" target="_blank">MiguMusicApi</a> (还是我的项目，也欢迎支持一下)</p>
+        <p>后端：「聚合接口」<a href="https://github.com/jsososo/MixMusicApi" target="_blank">MixMusicApi</a>（我的项目也太多了）</p>
         <p>Chrome插件：「QQ音乐Cookie搬运工」<a href="https://github.com/jsososo/qqmusic-cookie-porter" target="_blank">qqmusic-cookie-porter</a>  (又是我的项目，也欢迎支持一下)</p>
       </div>
     </div>
@@ -53,17 +54,8 @@
         </li>
       </ul>
     </div>
-
-    <div class="content-block">
-      <h2>未来</h2>
-      <div class="mt_20 ml_20">
-        <ul>
-          <li v-for="f in future" class="mb_15" :key="f">{{f}}</li>
-        </ul>
-      </div>
-    </div>
     
-    <div class="content-block">
+    <div class="content-block qr-block">
       <h2>服务器香油钱</h2>
       <div class="mt_20">
         <img class="pay-img" src="../assets/img/pay-1.png" alt="" />
@@ -287,12 +279,64 @@
           {
             txt: '🍧 mp3下砸支持更多id3标签、歌单收藏操作',
             time: '20-04-04',
+          },
+          {
+            txt: '😉 咪咕搜索部分音乐无法播放',
+            time: '20-04-12',
+          },
+          {
+            txt: '🎢 数据层重制、接口整合 ',
+            time: '20-05-17',
+          },
+          {
+            txt: '🎰 偷偷修复一些bug',
+            time: '20-05-19',
+          },
+          {
+            txt: '🍬 修复咪咕音乐接口问题',
+            time: '20-05-26',
+          },
+          {
+            txt: '⛱️ fix 网易云登陆串号并增加退出按钮',
+            time: '20-06-07',
+          },
+          {
+            txt: '🐼 缝缝补补一些bug',
+            time: '20-06-12',
+          },
+          {
+            txt: '🚒 网易云下载问题 & 音频图大优化！windows 也不卡了！',
+            time: '20-06-16',
+          },
+          {
+            txt: '😺 一些杂七杂八的优化',
+            time: '20-07-07',
+          },
+          {
+            txt: '🤔 下载歌词 & 支持下载歌名格式修改',
+            time: '20-08-02',
+          },
+          {
+            txt: '🥰 会员 & 无版权歌曲替换',
+            time: '20-08-15',
+          },
+          {
+            txt: '🦷 下载翻译 & 极简翻译 & id3标签 & fix 下载bug 歌单操作bug',
+            time: '20-08-23',
+          },
+          {
+            txt: '🚛 心动模式回归 & chrome 播放控件支持',
+            time: '20-08-30',
+          },
+          {
+            txt: '🐤 播放列表逻辑调整，支持加入正在播放 & 倍速 & 极简模式支持隐藏专辑封面',
+            time: '20-09-15',
+          },
+          {
+            txt: '📹 MV回归 & 歌单长列表性能优化 & 音量调节改为5%',
+            time: '20-09-18',
           }
         ],
-        future: [
-          '歌单编辑',
-          '电台播放',
-        ]
       }
     },
     created() {
@@ -310,6 +354,14 @@
     padding-right: 40%;
     max-height: calc(100vh - 120px);
     overflow: auto;
+    position: relative;
+
+    .qr-block {
+      width: 35%;
+      position: absolute;
+      top: 60px;
+      right: 10px;
+    }
 
     .content-block {
       margin-bottom: 40px;

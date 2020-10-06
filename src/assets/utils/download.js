@@ -41,37 +41,50 @@ export default function download(data, strFileName, strMimeType = null, songInfo
         if (e.currentTarget.status === 200) {
           var downInfo = e.target.response;
           // 下面是下载歌曲图片，通过 id3 加到歌曲信息中，这样就能显示图片了
-          if (songInfo && songInfo.al && songInfo.al.picUrl) {
-            var coverAjax = new XMLHttpRequest();
-            coverAjax.open('GET', songInfo.al.picUrl.replace(/http(s|):\/\/y\.gtimg\.cn/, `http://${window.location.host}/qqImg`), true);
-            coverAjax.responseType = 'arraybuffer';
-            coverAjax.onload = function (cE) {
-              try {
-                if (cE.currentTarget.status === 200) {
-                  const writer = new Id3(e.target.response);
-                  writer.setFrame('TIT2', songInfo.name)
-                    .setFrame('TPE1', songInfo.ar.map(a => a.name))
-                    .setFrame('TALB', songInfo.al.name)
-                    .setFrame('TRCK', songInfo.trackNo || '')
-                    .setFrame('APIC', {
-                      type: 3,
-                      data: coverAjax.response,
-                      description: songInfo.al.name,
-                    });
-                  songInfo.publishTime && writer.setFrame('TYER', timer(songInfo.publishTime).str('YYYY'));
-                  writer.addTag();
-                  downInfo = writer.arrayBuffer;
+          // 网易云的如果来源是qq,暂不添加id3
+          if (
+            !(songInfo.platform === '163' && songInfo.qqId) &&
+            songInfo && songInfo.al && songInfo.al.picUrl
+          ) {
+            try {
+              var coverAjax = new XMLHttpRequest();
+              coverAjax.open(
+                'GET',
+                songInfo.al.picUrl.replace(/http(s|):\/\/y\.gtimg\.cn/, `http://${window.location.host}/qqImg`).replace('300x300', '500x500'),
+                true
+              );
+              coverAjax.responseType = 'arraybuffer';
+              coverAjax.onload = function (cE) {
+                try {
+                  if (cE.currentTarget.status === 200) {
+                    const writer = new Id3(e.target.response);
+                    writer.setFrame('TIT2', songInfo.name)
+                      .setFrame('TPE1', songInfo.ar.map(a => a.name))
+                      .setFrame('TALB', songInfo.al.name)
+                      .setFrame('TRCK', songInfo.trackNo || '')
+                      .setFrame('APIC', {
+                        type: 3,
+                        data: coverAjax.response,
+                        description: songInfo.al.name,
+                      });
+                    songInfo.publishTime && writer.setFrame('TYER', timer(songInfo.publishTime).str('YYYY'));
+                    writer.addTag();
+                    downInfo = writer.arrayBuffer;
+                  }
+                } catch (err) {
+                  console.log('DOWN ERR: ', err);
                 }
-              } catch (err) {
-                console.log('DOWN ERR: ', err);
-              }
-              setTimeout(() => {
-                cb.success && cb.success();
-                download(downInfo, fileName, defaultMime);
-              }, 10);
-            };
+                setTimeout(() => {
+                  cb.success && cb.success();
+                  download(downInfo, fileName, defaultMime);
+                }, 10);
+              };
 
-            coverAjax.send();
+              coverAjax.send();
+            } catch (err) {
+              cb.success && cb.success();
+              download(downInfo, fileName, defaultMime);
+            }
           } else {
             cb.success && cb.success();
             download(downInfo, fileName, defaultMime);

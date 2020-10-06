@@ -2,9 +2,7 @@
   <div :class="`search-page-container ${show && 'show'}`" @scroll="onScroll">
     <input type="text" class="search-input mt_15" placeholder="Search..." v-model="keywords">
     <div class="platform-select">
-      <i @click="search('platform', '163')" :class="`iconfont icon-163 ${platform === '163' && 'active'}`" />
-      <i @click="search('platform', 'qq')" :class="`iconfont icon-qq ${platform === 'qq' && 'active'}`" />
-      <i @click="search('platform', 'migu')" :class="`iconfont icon-migu ${platform === 'migu' && 'active'}`" />
+      <i v-for="p in ['163', 'qq']" @click="search('platform', p)" :class="`iconfont icon-${p} ${platform === p && 'active'}`" />
     </div>
     <div class="ml_10 mt_10 mb_20">
       <div
@@ -20,104 +18,80 @@
     </div>
 
     <!-- 歌曲 -->
-    <div v-if="searchQuery.type === 1">
-      <div class="empty-status" v-if="!searchQuery.songs || searchQuery.songs.length === 0">
-        空空如也！
-      </div>
-      <div class="song-list result-list" v-if="searchQuery.songs && searchQuery.songs.length > 0">
-        <div
-          :class="`song-item ${(allSongs[s].url || allSongs[s].qqId) ? 'hasurl' : 'disabled'}`"
-          v-for="(s, i) in searchQuery.songs"
-          :key="`${s}-${i}`"
-          @click="playMusic(s)"
-        >
-          <div class="playing-bg" v-if="playNow.id === s" :style="`width: ${playingPercent * 100}%`">
-            <div class="wave-bg"></div>
-            <div class="wave-bg2"></div>
-          </div>
-          <div v-if="playNow.id !== s" class="play-icon-container">
-            <span class="play-icon">
-            <i class="iconfont icon-play" />
-          </span>
-          </div>
-          <span class="song-order">{{i+1}}</span>
-          <div class="song-album-img" :style="`background-image: url('${allSongs[s].al && `${allSongs[s].al.picUrl}?param=50y50`}')`"></div>
-          <span class="song-name">{{allSongs[s].name}}</span>
-          <span class="artist-name">{{allSongs[s].ar.map((a) => a.name).join('/')}}</span>
-          <span class="operation-btns">
-            <i
-              v-show="platform !== 'migu'"
-              v-if="favSongMap[platform]"
-              @click="likeMusic(s)"
-              :class="`operation-icon operation-icon-1 iconfont icon-${(favSongMap[platform][s]) ? 'like' : 'unlike'}`"
-            />
-            <i
-              v-show="platform !== 'migu'"
-              @click="playlistTracks(s, 'add', 'ADD_SONG_2_LIST', platform)"
-              class="operation-icon operation-icon-2 iconfont icon-add"
-            />
-            <i
-              @click="download(s)"
-              class="operation-icon operation-icon-2 iconfont icon-download"
-            />
-          </span>
-          <div
-            v-if="(favSongMap[platform] && favSongMap[platform][s])"
-            class="liked-item"
-          />
-        </div>
-      </div>
-    </div>
+<!--    <div v-if="searchQuery.type === 0">-->
+<!--      <div class="empty-status" v-if="!searchQuery.songs || searchQuery.songs.length === 0">-->
+<!--        空空如也！-->
+<!--      </div>-->
+<!--      <div class="song-list result-list" v-if="searchQuery.songs && searchQuery.songs.length > 0">-->
+<!--        <div-->
+<!--          :class="`song-item ${(allSongs[s].url) ? 'hasurl' : 'disabled'}`"-->
+<!--          v-for="(s, i) in searchQuery.songs"-->
+<!--          :key="`${s}-${i}`"-->
+<!--          @click="playMusic(s)"-->
+<!--        >-->
+<!--          <div class="playing-bg" v-if="playNow.aId === s" :style="`width: ${playingPercent * 100}%`">-->
+<!--            <div class="wave-bg"></div>-->
+<!--            <div class="wave-bg2"></div>-->
+<!--          </div>-->
+<!--          <div v-if="playNow.id !== s" class="play-icon-container">-->
+<!--            <span class="play-icon">-->
+<!--            <i class="iconfont icon-play" />-->
+<!--          </span>-->
+<!--          </div>-->
+<!--          <span class="song-order">{{i+1}}</span>-->
+<!--          <div class="song-album-img" :style="`background-image: url('${allSongs[s].al && `${allSongs[s].al.picUrl}?param=50y50`}')`"></div>-->
+<!--          <span class="song-name">{{allSongs[s].name}}</span>-->
+<!--          <span class="artist-name">{{allSongs[s].ar.map((a) => a.name).join('/')}}</span>-->
+<!--          <span class="operation-btns">-->
+<!--            <i-->
+<!--              v-show="platform !== 'migu'"-->
+<!--              v-if="favSongMap[platform]"-->
+<!--              @click="likeMusic(s)"-->
+<!--              :class="`operation-icon operation-icon-1 iconfont icon-${(favSongMap[platform][s]) ? 'like' : 'unlike'}`"-->
+<!--            />-->
+<!--            <i-->
+<!--              v-show="platform !== 'migu'"-->
+<!--              @click="playlistTracks(s, 'add', 'ADD_SONG_2_LIST', platform)"-->
+<!--              class="operation-icon operation-icon-2 iconfont icon-add"-->
+<!--            />-->
+<!--            <i-->
+<!--              @click="download(s)"-->
+<!--              class="operation-icon operation-icon-2 iconfont icon-download"-->
+<!--            />-->
+<!--          </span>-->
+<!--          <div-->
+<!--            v-if="(favSongMap[platform] && favSongMap[platform][s])"-->
+<!--            class="liked-item"-->
+<!--          />-->
+<!--        </div>-->
+<!--      </div>-->
+<!--    </div>-->
+
+    <SongList class-name="search-page" showIndex showCover empty-text="空空如也！" v-if="searchQuery.type === 0" :songs="searchQuery.songs || []" />
 
     <!-- 专辑 -->
-    <div v-if="searchQuery.type === 10">
-      <div class="album-list result-list" v-if="searchQuery.albums && searchQuery.albums.length > 0">
-        <div
-          v-for="a in searchQuery.albums" :key="a.id" class="album-item"
-        >
-          <div class="album-img-container pointer" @click="changeUrlQuery({ id: a.id, mid: a.mid, from: a.from }, '#/album')">
-            <img :src="`${a.picUrl}?param=200y200`">
-          </div>
-          <div class="album-name pointer" @click="goTo(`#/album?id=${a.id}`)">{{a.name}}</div>
-        </div>
-      </div>
-      <div class="empty-status" v-if="!searchQuery.albums || searchQuery.albums.length === 0">
-        空空如也！
-      </div>
-    </div>
+    <AlbumList empty-text="空空如也！" v-if="searchQuery.type === 2" :albums="searchQuery.albums" />
 
     <!-- 歌手 -->
-    <div v-if="searchQuery.type === 100">
-      <div class="singer-list result-list" v-if="searchQuery.artists && searchQuery.artists.length > 0">
-        <div v-for="s in searchQuery.artists" class="singer-item" @click="changeUrlQuery({ id: s.id, mid: s.mid, from: s.from }, '#/singer')">
-          <img class="singer-img" :src="`${String(s.picUrl) === 'null' ? 'http://p3.music.126.net/VnZiScyynLG7atLIZ2YPkw==/18686200114669622.jpg' : s.picUrl}?param=120y120`"  />
-          <div class="singer-name">{{s.name}}</div>
-        </div>
-      </div>
-      <div class="empty-status" v-if="!searchQuery.artists || searchQuery.artists.length === 0">
-        空空如也！
-      </div>
-    </div>
+    <SingerList empty-text="空空如也！" v-if="searchQuery.type === 3" :singers="searchQuery.singers" />
 
     <!-- 歌单 -->
-    <div v-if="searchQuery.type === 1000">
+    <div v-if="searchQuery.type === 1">
       <div class="playlist-list result-list" v-if="searchQuery.playlists && searchQuery.playlists.length > 0">
-        <div v-for="s in searchQuery.playlists" class="playlist-item" @click="changeUrlQuery({ id: s.id, from: s.from }, '#/playlist/detail')">
-          <img class="playlist-img" :src="`${s.coverImgUrl}?param=120y120`"  />
+        <div v-for="s in searchQuery.playlists" class="playlist-item" @click="changeUrlQuery({ id: s.id, from: s.platform }, '#/playlist/detail')">
+          <img class="playlist-img" :src="`${s.cover}?param=120y120`"  />
           <div class="playlist-name">{{s.name}}</div>
           <div class="playlist-author">
             <el-tooltip
-              v-if="
-                (((s.from || ('163')) === '163') && user && user.userId !== s.userId) ||
-                (s.from === 'qq') && (s.creator.qq != qqId)"
+              v-if="userList[s.platform] && !userList[s.platform].mine[`${s.platform}_${s.id}`]"
               class="item"
               effect="dark"
               :content="s.subscribed ? '已收藏' : '收藏'"
               placement="top"
             >
-              <i @click="collectPlaylist(s)" :class="`inline-block mr_10 iconfont icon-${s.subscribed ? 'collected' : 'collect'}`" />
+              <i @click="collectPlaylist(s)" :class="`inline-block mr_10 iconfont icon-${userList[s.platform].sub[`${s.platform}_${s.id}`] ? 'collected' : 'collect'}`" />
             </el-tooltip>
-            <span v-if="s.creator">By: {{s.creator.nickname || s.creator.name}}</span>
+            <span v-if="s.creator && s.creator.nick">By: {{s.creator.nick}}</span>
             <span class="pl_20"><i class="iconfont icon-yinyue" />: {{numToStr(s.playCount || 0)}}</span>
           </div>
           <div class="playlist-trackcount">{{s.trackCount}}</div>
@@ -137,37 +111,41 @@
   import { messageHelp } from "../assets/utils/util";
   import $ from 'jquery';
   import Storage from "../assets/utils/Storage";
+  import AlbumList from '../components/list/album';
+  import SingerList from '../components/list/singer';
+  import SongList from '../components/list/song';
 
   export default {
     name: "Search",
+    components: { AlbumList, SingerList, SongList },
     data() {
       return {
         show: false,
         keywords: '',
         typeList: [
           {
-            val: 1,
+            val: 0,
             color: 'red',
             icon: 'song',
             text: '歌曲',
             hasQQ: true,
           },
           {
-            val: 10,
+            val: 2,
             color: 'blue',
             icon: 'album',
             text: '专辑',
             hasQQ: true,
           },
           {
-            val: 100,
+            val: 3,
             color: 'green',
             icon: 'singer',
             text: '歌手',
             hasQQ: true,
           },
           {
-            val: 1000,
+            val: 1,
             color: 'yellow',
             icon: 'playlist',
             text: '歌单',
@@ -208,7 +186,6 @@
       setTimeout(() => this.show = true, 1);
       this.platform = this.searchQuery.platform;
       this.keywords = this.searchQuery.keywords;
-      messageHelp(2);
     },
     beforeDestroy() {
       this.show = false;
@@ -245,6 +222,7 @@
         const viewH = el.height(); // 可见高度
         const contentH = el.get(0).scrollHeight; // 内容高度
         const scrollTop = el.scrollTop(); // 滚动高度
+        console.log(contentH - viewH - scrollTop, 150, pageNo * 30, total)
         if (contentH - viewH - scrollTop < 150 && pageNo * 30 < total && !loading) {
           this.search('pageNo', pageNo + 1);
         }
@@ -321,9 +299,9 @@
     width: 38%;
     background: #0003;
     transition: 0.3s;
-    right: 20px;
+    right: -100vw;
     top: 20px;
-    transform: rotate(90deg) translate(100%, -20px);
+
     border-radius: 20px;
     overflow-y: auto;
     
@@ -355,7 +333,8 @@
     }
 
     &.show {
-      transform: rotate(0) translate(0, 0);
+      right: 20px;
+      /*transform: rotate(0) translate(0, 0);*/
     }
 
     .search-input {
@@ -577,93 +556,6 @@
             padding-left: 20px;
             line-height: 100px;
           }
-        }
-      }
-    }
-
-    .singer-list {
-      .singer-item {
-        position: relative;
-        width: 25%;
-        box-sizing: border-box;
-        display: inline-block;
-        vertical-align: top;
-        margin-bottom: 20px;
-        text-align: center;
-        cursor: pointer;
-        transition: 0.3s;
-        opacity: 0.7;
-
-        &:hover {
-          opacity: 1;
-        }
-
-        .singer-img {
-          width: 60%;
-          border-radius: 50%;
-          margin-top: 20px;
-        }
-
-        .singer-name {
-          padding-top: 10px;
-          color: #fff8;
-        }
-      }
-    }
-
-    .album-list {
-      .album-item {
-        display: inline-block;
-        width: 50%;
-        box-sizing: border-box;
-        text-align: center;
-        margin: 20px 0;
-        transition: 0.3s;
-        opacity: 0.7;
-        box-shadow: 0 0 0 transparent;
-        color: #fffc;
-
-        &:hover {
-          opacity: 0.9;
-
-          .album-img-container {
-            border-radius: 20px;
-            box-shadow: 0 0 30px #333333;
-
-            img {
-              width: 170px;
-              height: 170px;
-              top: -10px;
-              left: -10px;
-            }
-          }
-        }
-
-        .album-img-container {
-          display: inline-block;
-          width: 150px;
-          height: 150px;
-          position: relative;
-          overflow: hidden;
-          border-radius: 30px;
-          transition: 0.4s;
-
-          img {
-            width: 150px;
-            height: 150px;
-            left: 0;
-            top: 0;
-            position: absolute;
-            transition: 0.3s linear;
-          }
-        }
-        .album-name {
-          margin-top: 5px;
-          padding: 0 20px;
-          overflow: hidden;
-          white-space: nowrap;
-          text-overflow: ellipsis;
-          box-sizing: border-box;
         }
       }
     }

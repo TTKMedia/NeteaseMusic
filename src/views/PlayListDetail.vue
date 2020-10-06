@@ -3,89 +3,105 @@
     <div v-if="!listInfo && loading && list.length === 0" class="text-center fc_fff ft_20" style="padding-top: 100px;opacity: 0.8;letter-spacing: 2px;">拼命查找了！</div>
     <div v-if="!loading" class="list-info-detail">
       <div v-if="listInfo">
-        <img class="list-info-cover" :src="`${listInfo.coverImgUrl}?param=100y100`">
+        <img class="list-info-cover" :src="listInfo.cover">
         <div class="list-info-txt">
           <div class="list-info-name">{{listInfo.name}}</div>
-          <div class="list-info-creator" v-if="listInfo.creator && platform === '163'">
+          <div class="list-info-creator">
             <el-tooltip
-              v-if="(user && user.userId) !== listInfo.creator.userId"
+              v-if="userList[platform] && !userList[platform].mine[listId]"
               class="item"
               effect="dark"
-              :content="listInfo.subscribed ? '已收藏' : '收藏'"
+              :content="userList[platform].sub[listId] ? '已收藏' : '收藏'"
               placement="top"
             >
-              <i @click="collectPlaylist(listInfo)" :class="`collect-btn mr_10 iconfont icon-${listInfo.subscribed ? 'collected' : 'collect'}`" />
+              <i @click="collectPlaylist(listInfo)" :class="`collect-btn mr_10 iconfont icon-${userList[platform].sub[listId] ? 'collected' : 'collect'}`" />
             </el-tooltip>
-            <span>By <a :href="`#/user?id=${listInfo.creator.userId}`"><span class="creator-name">{{listInfo.creator.nickname}}</span></a></span>
-          </div>
-          <div class="list-info-creator" v-if="listInfo.creator && platform === 'qq'">
-            <el-tooltip
-              v-if="!(qUserList.obj[id] && qUserList.obj[id].creator.id == qqId)"
-              class="item"
-              effect="dark"
-              :content="listInfo.subscribed ? '已收藏' : '收藏'"
-              placement="top"
-            >
-              <i @click="collectPlaylist(listInfo)" :class="`collect-btn mr_10 iconfont icon-${listInfo.subscribed ? 'collected' : 'collect'}`" />
-            </el-tooltip>
-            <span>By <span class="creator-name">{{listInfo.creator.nickname}}</span></span>
-          </div>
-          <div class="list-info-creator" v-if="listInfo.creator && platform === 'migu'">
-            By <span class="creator-name">{{listInfo.creator.name}}</span>
+            <span>By <span class="creator-name">{{listInfo.creator.nick}}</span></span>
           </div>
         </div>
       </div>
       <div>
         <input v-model="search" class="search-input" type="text" placeholder="找呀找呀找歌曲">
         <div class="inline-block mt_15 pt_5">下列歌曲：</div>
-        <div @click="playListShow" v-if="list.length > 0" class="inline-block mt_15 pt_5 pointer play" style="line-height: 20px;">
-          <i class="iconfont icon-play pl_10 pr_10" />
-        </div>
-        <div @click="downShow" v-if="list.length > 0" class="inline-block mt_15 pt_5 pointer play" style="line-height: 20px;">
-          <i class="iconfont icon-download pl_10 pr_10" />
-        </div>
+        <el-tooltip class="item" effect="dark" content="播放" placement="top">
+          <div @click="playListShow(true)" v-if="list.length > 0" class="inline-block mt_15 pt_5 pointer play" style="line-height: 20px;">
+            <i class="iconfont icon-play pl_10 pr_10" />
+          </div>
+        </el-tooltip>
+        <el-tooltip class="item" effect="dark" content="添加到播放列表" placement="top">
+          <div @click="playListShow()" v-if="list.length > 0" class="inline-block mt_15 pt_5 pointer play" style="line-height: 20px;">
+            <i class="iconfont icon-list-add pl_10 pr_10" />
+          </div>
+        </el-tooltip>
+        <el-tooltip class="item" effect="dark" content="下载" placement="top">
+          <div @click="downShow" v-if="list.length > 0" class="inline-block mt_15 pt_5 pointer play" style="line-height: 20px;">
+            <i class="iconfont icon-download pl_10 pr_10" />
+          </div>
+        </el-tooltip>
       </div>
     </div>
-    <div class="song-list" v-if="allList[trueId] || id === 'playing'">
+    <div class="song-list" v-if="allList[listId] || id === 'playing'">
+      <div :style="`height:${smallIndex*71}px;`"></div>
       <div
-        :class="`song-item ${playNow.id === s ? 'played' : ''} ${!allSongs[s].url ? 'disabled' : ''} ${((i < smallIndex) || (i > bigIndex)) ? 'hidden' : ''}`"
+        :class="`song-item ${playNow.aId === s ? 'played' : ''} ${!allSongs[s].url ? 'disabled' : ''} ${((i < smallIndex) || (i > bigIndex)) ? 'hidden' : ''}`"
         v-for="(s, i) in list"
+        v-if="allSongs[s] && i >= smallIndex && i <= bigIndex"
         :key="`${s}-${i}`"
-        @click="playMusic(s)"
+        @click="playMusic(s, list, listId)"
       >
-        <div class="playing-bg" v-if="playNow.id === s" :style="`width: ${playingPercent * 100}%`">
+        <div class="playing-bg" v-if="playNow.aId === s" :style="`width: ${playingPercent * 100}%`">
           <div class="wave-bg"></div>
           <div class="wave-bg2"></div>
         </div>
         <span class="song-order">{{i+1}}</span>
-        <img class="song-cover" :src="`${allSongs[s].al.picUrl}?param=50y50`" alt="">
+        <img class="song-cover" :src="`${allSongs[s].al && allSongs[s].al.picUrl}?param=50y50`" alt="" />
         <span class="song-name">{{allSongs[s].name}}</span>
-        <span class="song-artist">{{allSongs[s].ar.map((a) => a.name).join('/')}}</span>
+        <span class="song-artist">{{(allSongs[s].ar || []).map((a) => a.name).join('/')}}</span>
         <div class="icon-container">
           <i
-            v-if="(id !== userList.favId) && id !== qUserList.favId && allSongs[s].from !== 'migu'"
+            v-if="userList[allSongs[s].platform] && (listId !== userList[allSongs[s].platform].favListId)"
             @click="likeMusic(s)"
-            :class="`operation-icon operation-icon-1 iconfont icon-${!!favSongMap[allSongs[s].from || '163'][s] ? 'like' : 'unlike'}`"
+            :class="`operation-icon operation-icon-1 iconfont icon-${!!favSongMap[allSongs[s].platform][s] ? 'like' : 'unlike'}`"
           />
-          <i
-            v-if="allSongs[s].from !== 'migu'"
-            @click="playlistTracks(s, id, 'add', 'ADD_SONG_2_LIST', allSongs[s].from)"
-            class="operation-icon operation-icon-2 iconfont icon-add"
-          />
-          <i
-            v-if="!!allSongs[s].url"
-            @click="download(s)"
-            class="operation-icon operation-icon-3 iconfont icon-download"
-          />
-          <i
-            @click="playlistTracks(s, id, 'del', 'DEL_SONG', allSongs[s].from)"
-            v-if="(platform === '163' && userList.obj && userList.obj[id] && !userList.obj[id].subscribed && (id !== userList.favId)) ||
-                   (platform === 'qq' && qUserList.obj && qUserList.obj[id] && (id != qUserList.favId))"
-            class="operation-icon operation-icon-4 iconfont icon-delete"
-          />
+          <el-tooltip class="item" effect="dark" content="添加到歌单" placement="top">
+            <i
+              v-if="allSongs[s].from !== 'migu'"
+              @click="playlistTracks(s, listId, 'add', 'ADD_SONG_2_LIST', allSongs[s].platform)"
+              class="operation-icon operation-icon-2 iconfont icon-add"
+            />
+          </el-tooltip>
+          <el-tooltip class="item" effect="dark" content="移出播放列表" placement="top">
+            <i
+              v-if="playingList.map[s]"
+              @click="removePlaying(s)"
+              class="operation-icon operation-icon-3 iconfont icon-list-reomve"
+            />
+          </el-tooltip>
+          <el-tooltip class="item" effect="dark" content="加入播放列表" placement="top">
+            <i
+              v-if="allSongs[s].url && !playingList.map[s]"
+              @click="addPlaying(s)"
+              class="operation-icon operation-icon-3 iconfont icon-list-add"
+            />
+          </el-tooltip>
+          <el-tooltip class="item" effect="dark" content="下载" placement="top">
+            <i
+              v-if="!!allSongs[s].url"
+              @click="download(s)"
+              class="operation-icon operation-icon-4 iconfont icon-download"
+            />
+          </el-tooltip>
+          <el-tooltip class="item" effect="dark" content="从歌单中删除" placement="top">
+            <i
+              @click="playlistTracks(s, listId, 'del', 'DEL_SONG')"
+              v-if="userList[allSongs[s].platform] && userList[allSongs[s].platform].mine && userList[allSongs[s].platform].mine[listId]"
+              class="operation-icon operation-icon-5 iconfont icon-delete"
+            />
+          </el-tooltip>
         </div>
       </div>
-      <div class="focus-btn" v-if="list.indexOf(playNow.id) > -1" @click="scrollToPlayNow">
+      <div :style="`min-height:0;height:${(list.length - bigIndex)*71}px;`"></div>
+      <div class="focus-btn" v-if="list.indexOf(playNow.aId) > -1" @click="scrollToPlayNow">
         <i class="iconfont icon-focus" />
       </div>
     </div>
@@ -94,16 +110,22 @@
 
 <script>
   import { getQueryFromUrl } from "../assets/utils/stringHelper";
-  import { getPlayList, likeMusic, download, getQQPlayList, getMiguPlayList, collectPlaylist } from "../assets/utils/request";
+  import {
+    getPlaylist,
+    likeMusic,
+    download,
+    collectPlaylist,
+  } from "../assets/utils/request";
   import { mapGetters } from 'vuex';
   import Storage from "../assets/utils/Storage";
+  import { handlePlayingList } from "../assets/utils/util";
 
   export default {
     name: "PlayListDetail",
     data() {
       return {
         id: getQueryFromUrl('id'),
-        trueId: '',
+        listId: '',
         search: '',
         list: [],
         listInfo: null,
@@ -139,8 +161,9 @@
         this.searchList();
       },
       $route(){
-        this.id = this.$route.query.id;
         this.platform = this.$route.query.from || '163';
+        this.id = this.$route.query.id.replace(`${this.platform}_`, '');
+        this.listId = `${this.platform}_${this.id}`;
         this.init();
       },
       playingList: {
@@ -154,87 +177,48 @@
     },
     created() {
       const { allList, id, userList, platform } = this;
-      this.trueId = `${{163: '', qq: 'qq', migu: 'migu'}[platform] || ''}${id}`;
-      this.list = allList[this.trueId] || [];
-      this.listInfo = (userList && userList.obj && userList.obj[id]) || null;
+      this.id = String(id).replace(`${platform}_`, '');
+      this.listId = `${platform}_${this.id}`;
+      this.list = allList[this.listId] || [];
       this.init();
     },
     methods: {
       async init() {
         const { id, platform, qUserList, list } = this;
         this.loading = false;
-        if (id === 'daily') {
-          this.listInfo = null;
-          return this.list = this.allList.daily || [];
-        }
         if (id === 'playing') {
           this.listInfo = null;
           return this.list = this.playingList.trueList || [];
         }
+        const listId = this.listId = `${platform}_${id}`;
+        if (listId === `${platform}_daily`) {
+          this.listInfo = null;
+          return this.list = this.allList[listId] || [];
+        }
         this.loading = true;
-        this.trueId = `${{163: '', qq: 'qq', migu: 'migu'}[platform] || ''}${id}`;
-        switch (this.platform) {
-          case 'qq':
-            getQQPlayList(this.id)
-              .then(({ dissname, nickname, logo }) => {
-                this.listInfo = {
-                  name: dissname,
-                  creator: { nickname },
-                  coverImgUrl: logo,
-                  platform: 'qq',
-                  from: 'qq',
-                  id,
-                  subscribed: qUserList.obj[id] && qUserList.obj[id].subscribed
-                };
-                this.list = this.allList[this.trueId] || [];
-                this.loading = false;
-              });
-            break;
-          case 'migu':
-            const result = await getMiguPlayList(this.id, 1);
-            const { totalPage, list, name, creator, picUrl: coverImgUrl, playCount } = result;
-            this.$store.dispatch('query163List', { songs: list, listId: this.trueId });
-            this.listInfo = { name, creator, coverImgUrl, playCount, platform: 'migu' };
-            this.list = this.allList[this.trueId] || [];
-            this.loading = false;
-            for (let i = 2; i <= totalPage; i++) {
-              const { list } = await getMiguPlayList(this.id, i);
-              this.$store.dispatch('query163List', { songs: [ ...this.allList[this.trueId], ...list ], listId: this.trueId });
-            }
-            break;
-          default:
-            getPlayList(this.id)
-              .then(({ playlist }) => {
-                const { name, creator, coverImgUrl, playCount, subscribed, id } = playlist;
-                this.listInfo = { name, creator, coverImgUrl, playCount, id, platform: '163', subscribed };
-                this.loading = false;
-              })
+        const listInfo = await getPlaylist(id, platform);
+        if (!listInfo) {
+          return this.$message.error('获取歌单信息出错！');
         }
+        this.listInfo = listInfo;
+        this.songs = this.listInfo.songs;
+        this.loading = false;
       },
-      playMusic(id) {
-        const { allSongs, allList, trueId, platform } = this;
-        const { dispatch } = this.$store;
-        const song = allSongs[id];
-        if (!song.url) {
-          return;
-        }
-        let list = allList[trueId];
-        if (trueId === 'playing')
-          list = this.playingList.trueList;
-        dispatch('updatePlayNow', song);
-        dispatch('updatePlayingList', { list, id: trueId });
-        dispatch('updatePlayingStatus', true);
-      },
-      playListShow() {
-        const { allSongs, list, trueId: id } = this;
+      playListShow(playing) {
+        const { allSongs, list, listId } = this;
         const { dispatch } = this.$store;
         const song = allSongs[list[0]];
         if (!song.url) {
           return;
         }
-        dispatch('updatePlayNow', song);
-        dispatch('updatePlayingList', { list, id });
-        dispatch('updatePlayingStatus', true);
+        if (playing) {
+          dispatch('updatePlayNow', song);
+          dispatch('updatePlayingList', { list, listId });
+          dispatch('updatePlayingStatus', true);
+        } else {
+          dispatch('updatePlayingList', { list, more: true });
+          this.$message.success('已添加到正在播放');
+        }
       },
       downShow() {
         const { allSongs, list } = this;
@@ -256,15 +240,15 @@
 
       },
       searchList() {
-        const { search, allList, trueId: id, allSongs, platform } = this;
+        const { search, allList, listId, id, allSongs, platform } = this;
         const rex = search.replace(/\/|\s|\t|,|，|-|/g, '').toLowerCase();
         let rawList = [];
-        switch (this.id) {
-          case 'playing':
+        switch (listId) {
+          case `${platform}_playing`:
             rawList = this.playingList.trueList;
             break;
-          case 'daily':
-            rawList = this.allList.daily;
+          case `${platform}_${id}`:
+            rawList = this.allList[listId];
             break;
           default:
             rawList = allList[id];
@@ -272,23 +256,23 @@
         }
         rawList = rawList || [];
         if (!rex) {
-          this.showScrollTo = rawList.indexOf(this.playNow.id) !== -1;
+          this.showScrollTo = rawList.indexOf(this.playNow.aId) !== -1;
           return this.list = rawList;
         }
         this.list = rawList.filter((s) => (
           `${allSongs[s].name}
-          ${allSongs[s].ar.map((a) => a.name)}
+          ${(allSongs[s].ar || []).map((a) => a.name)}
           ${allSongs[s].al.name}
           ${allSongs[s].name}
           ${allSongs[s].al.name}
-          ${allSongs[s].ar.map((a) => a.name)}
+          ${(allSongs[s].ar || []).map((a) => a.name)}
           ${allSongs[s].name}`
             .replace(/\s/g, '')
             .toLowerCase()
             .indexOf(rex) > -1
         ));
       },
-      likeMusic: likeMusic,
+      likeMusic,
       playlistTracks(tracks, pid, op, type, platform) {
         window.event.stopPropagation();
         this.$store.dispatch('setOperation', { data: { tracks, pid, op }, type, platform });
@@ -298,17 +282,19 @@
       getShowIndex() {
         const dom = document.getElementsByClassName('list-detail-container')[0];
         const smallHeight = Math.max(dom.scrollTop - 500, 0);
-        this.smallIndex = smallHeight / 71;
+        this.smallIndex = Math.floor(smallHeight / 71);
         const bigHeight = dom.clientHeight + dom.scrollTop + 300;
-        this.bigIndex = bigHeight / 71;
+        this.bigIndex = Math.floor(bigHeight / 71);
       },
       scrollToPlayNow() {
-        const domP = document.getElementsByClassName('song-item played')[0];
+        const { list, playNow } = this;
+        const index = this.list.findIndex((v) => v === playNow.aId);
         const domL = document.getElementsByClassName('song-list')[0];
-        if (domP) {
-          document.getElementsByClassName('list-detail-container')[0].scrollTo(0, domP.offsetTop + domL.offsetTop);
+        if (index > -1) {
+          document.getElementsByClassName('list-detail-container')[0].scrollTo(0, index * 71 + domL.offsetTop);
         }
       },
+      ...handlePlayingList,
     }
   }
 </script>
@@ -382,7 +368,7 @@
         font-size: 20px;
         outline: none !important;
         border-bottom: 1px solid #0003;
-        width: calc(100% - 170px);
+        width: calc(100% - 200px);
         margin-left: 0;
 
         &::-webkit-input-placeholder {
@@ -557,7 +543,7 @@
           bottom: 5px;
           left: 350px;
 
-          @for $i from 1 through 5 {
+          @for $i from 1 through 7 {
             .operation-icon-#{$i} {
               transform: translate(0, 40px);
               transition: 0.3s #{($i - 1) * 0.1}s;

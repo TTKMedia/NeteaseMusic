@@ -1,3 +1,5 @@
+import Storage from '../assets/utils/Storage'
+
 export default {
   mode: '', // 一个全局的 ui 模式
   allSongs: {}, // 全部的歌曲信息，其他地方除了 playNow 不再存储信息，一律通过 id 到 allSongs 中获取
@@ -10,7 +12,7 @@ export default {
   }, // qq音乐的用户歌单信息
   recommendList: {}, // 推荐歌单信息
   search: { // 搜索的参数和结果
-    type: 1,
+    type: 0,
     total: 0,
     pageNo: 1,
     keywords: '',
@@ -22,6 +24,7 @@ export default {
     random: [], // 随机列表
     history: [], // 播放历史
     index: 0, // 当前播放对应播放历史的位置
+    map: {}, // key: id, value: true
   },
   playNow: { // 正在播放的歌曲信息
     al: {},
@@ -46,11 +49,10 @@ export default {
     open: false,
   },
   loading: false,
-  reading: false,
-  downloadInfo: { // 下载信息
+  downloadInfo: Storage.get('download_info', true, JSON.stringify({
     count: 0,
     list: [],
-  },
+  })),
   isPersonFM: false, // 是否为私人fm,
   favSongMap: { // 喜欢的歌曲 id map
     163: {},

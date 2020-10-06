@@ -1,6 +1,6 @@
 <template>
   <div class="player-container">
-    <div v-if="showControl && playNow.id && allSongs[playNow.id]">
+    <div v-if="showControl && playNow && playNow.id">
       <!-- 播放，上一首、下一首进度 -->
       <div class="control-btn">
         <div class="inline-block">
@@ -19,16 +19,16 @@
       <div class="inline-block progress-container">
         <!-- 歌曲信息 -->
         <div class="song-info">
-          <i class="el-icon-loading mr_10" v-if="loading || Boolean(isReading)" />
+          <i class="el-icon-loading mr_10" v-if="loading" />
           <span class="player-song-title pointer" @click="goTo('#/')">{{playNow.name}}</span>
           <span class="player-song-singer pl_20 pointer">
-            <a v-for="a in allSongs[playNow.id].ar" :key="a.id" :href="changeUrlQuery({ id: a.id, mid: a.mid, from: playNow.from }, '#/singer', false)">{{a.name}} </a>
+            <a v-for="a in playNow.ar" :key="a.id" :href="changeUrlQuery({ id: a.id, mid: a.mid, from: playNow.platform }, '#/singer', false)">{{a.name}} </a>
           </span>
           <span
-            v-if="playNow.from !== 'migu'"
-            @click="likeMusic(playNow.id)"
+            v-if="favSongMap[playNow.platform]"
+            @click="likeMusic(playNow.aId)"
             style="margin-left: 25px; cursor: pointer;"
-            :class="(favSongMap[playNow.from || '163'][playNow.id]) ? 'iconfont icon-like iconfont' : 'iconfont icon-unlike'">
+            :class="(favSongMap[playNow.platform][playNow.aId]) ? 'iconfont icon-like iconfont' : 'iconfont icon-unlike'">
           </span>
         </div>
         <!-- 歌曲播放进度 -->
@@ -81,7 +81,7 @@
          <!--下载-->
         <el-tooltip class="item" effect="dark" content="下载" placement="top">
           <div class="inline-block ml_5 pd_5">
-            <span @click="down(playNow.id)">
+            <span @click="down(playNow.aId)">
               <i class="iconfont icon-download ft_16 pointer" />
             </span>
           </div>
@@ -89,22 +89,14 @@
 
         <!-- 添加到歌单 -->
         <el-tooltip class="item" effect="dark" content="添加到歌单" placement="top">
-          <div class="inline-block ml_5 pd_5" v-if="playNow.from !== 'migu'">
-            <span @click="playlistTracks(playNow.id, 'add', 'ADD_SONG_2_LIST', playNow.from || '163')">
+          <div class="inline-block ml_5 pd_5" v-if="playNow.platform !== 'migu'">
+            <span @click="playlistTracks(playNow.aId, 'add', 'ADD_SONG_2_LIST')">
               <i class="iconfont icon-add ft_16 pointer" />
             </span>
           </div>
         </el-tooltip>
 
-        <input id="cp-share-input" :value="changeUrlQuery({ shareId: playNow.id, from: playNow.from, shareCid: playNow.cid }, 'http://music.jsososo.com/#/', false)">
-        <!-- 分享 -->
-        <el-tooltip class="item" effect="dark" content="分享" placement="top">
-          <div class="inline-block ml_5 pd_5">
-            <span @click="copyUrl">
-              <i class="iconfont icon-share ft_16 pointer" />
-            </span>
-          </div>
-        </el-tooltip>
+        <input id="cp-share-input" :value="changeUrlQuery({ shareId: playNow.id, from: playNow.platform, shareCid: playNow.cid }, 'http://music.jsososo.com/#/', false)">
 
         <el-tooltip class="item" effect="dark" content="正在播放" placement="top">
           <div @click="goTo('#/playlist/detail?id=playing')" class="inline-block ml_5 pd_5">
@@ -113,6 +105,30 @@
             </span>
           </div>
         </el-tooltip>
+
+        <!-- 更多 -->
+        <div class="more-control"  @mouseleave="showMore = false">
+          <div v-if="showMore" class="more-list-container" @mouseleave="showMore = false" @mouseover="showMore = true">
+            <div class="more-list">
+              <div v-for="more in moreList" @click="handleClickMore(more.key)">
+                <i :class="`iconfont icon-${more.key}`" />
+                <span style="padding-left: 5px;">{{more.text}}</span>
+              </div>
+            </div>
+          </div>
+          <div class="ml_10" @mouseover="showMore = true" >
+            <i class="iconfont icon-more" />
+          </div>
+          <div class="rate-slider" v-if="showRateSlider" @mouseleave="showRateSlider = false">
+            <el-slider
+              @input="(v) => playerDom.playbackRate = v"
+              v-model="rate"
+              :max="3"
+              :min="0.3"
+              :step="0.1"
+            />
+          </div>
+        </div>
 
         <div class="back-container">
           <a class="iconfont icon-feedback" href="#/feedback" />
@@ -124,7 +140,7 @@
 
       </div>
     </div>
-    <audio id="m-player" :src="playingUrl || ''" controls></audio>
+    <audio id="m-player" crossOrigin="anonymous" :src="playingUrl || ''" controls></audio>
   </div>
 </template>
 
@@ -137,11 +153,12 @@
     download,
     getPersonFM,
     handleQQComments,
-    getMusicData,
-    getHighQualityUrl
+    getHighQualityUrl, getDownName, queryLyric, downLyricFunc
   } from '../assets/utils/request';
   import { handleLyric, getQueryFromUrl, changeUrlQuery } from "../assets/utils/stringHelper";
   import ArrayHelper from '../assets/utils/arrayHelper';
+  import DrawMusic from "../assets/utils/drawMusic";
+  import downReq from '../assets/utils/download';
 
   export default {
     name: "PlayerPage",
@@ -150,9 +167,12 @@
         playerDom: null,
         currentTime: 0,
         volume: 0,
+        rate: 1,
         stopUpdateCurrent: false,
         showVolume: false,
         showOrder: false,
+        showMore: false,
+        showRateSlider: false,
         orderList: ['suiji', 'danquxunhuan', 'liebiao'],
         orderType: Storage.get('orderType'),
         showControl: !getQueryFromUrl('hideControl'),
@@ -167,6 +187,12 @@
         errorId: '',
         playingUrl: '',
         isUpdating: false,
+        moreList: [
+          { key: 'share', text: '分享' },
+          { key: 'down-lyric', text: '歌词' },
+          { key: 'home', text: '歌词' },
+          { key: 'adjust', text: '倍速' },
+        ]
       }
     },
     computed: {
@@ -184,50 +210,66 @@
         isPersonFM: 'isPersonFM',
         playingList: 'getPlayingList',
         mode: 'getMode',
-        isReading: 'isReading',
         favSongMap: 'getFavSongMap',
       }),
     },
     watch: {
       async playNow(v) {
+        if (!v) {
+          return;
+        }
         const { listId, playingId, playerInfo, isPersonFM, playingList, playingPlatform, isUpdating, pDom } = this;
-        const { id, lyric, name, comments, mid, songid, cid, qqId, miguId, br, pUrl } = v;
+        const { id, lyric, name, comments, mid, songid, cId, br, pUrl, aId, platform, qqId, miguId, al = {}, ar = [] } = v;
         let { url } = v;
-        const trueId = v.from === 'qq' ? mid : id;
         const dispatch = this.$store.dispatch;
         const listenSize = Storage.get('listenSize') || '128';
-        const needRead = Storage.get('showDrawMusic') !== '0';
         if (isUpdating)
           return;
         // 这是刚切歌的时候需要判断下用户选择的播放品质并更新一下，同时如果已经在查询
+
+        if ('mediaSession' in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: name,
+            artist: ar.map((v) => v.name).join('/'),
+            album: al.name,
+            artwork: [
+              {src: al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg', sizes: '96x96'},
+              {src: al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg', sizes: '128x128'},
+              {src: al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg', sizes: '192x192'},
+              {src: al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg', sizes: '256x256'},
+              {src: al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg', sizes: '384x384'},
+              {src: al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg', sizes: '512x512'},
+            ]
+          });
+        }
         if ((pUrl !== this.playingUrl || !this.playingUrl) && url) {
           dispatch('setLoading', true);
-          if (needRead)
-            dispatch('setReading', true);
           this.isUpdating = true;
           const listenBr = {128: 128000, 320: 320000, flac: 960000}[listenSize];
           let [nUrl, nBr] = [url, br]; // 默认原始的信息
-          if (pUrl && Number(br) === listenBr) { // 有 pUrl 且与当前选择的品质相同
-            nUrl = pUrl;
+          if ((pUrl && Number(br) === listenBr) || listenSize === '128') { // 有 pUrl 且与当前选择的品质相同
+            nUrl = pUrl || url;
             nBr = listenBr;
           } else if (qqId || miguId) { // 如果是qq音乐或者咪咕音乐，获取播放链接
-            const result = await getHighQualityUrl(id, listenSize);
-            nUrl = result.url;
+            const result = await getHighQualityUrl(aId, listenSize);
+            nUrl = result.url || url;
             nBr = result.br;
           }
           this.isUpdating = false;
           this.playingUrl = nUrl;
           pDom && pDom.pause();
+
           await dispatch('updateSongDetail', {
             pUrl: nUrl,
             br: nBr,
             id,
+            aId,
           });
-          if (needRead) {
-            getMusicData(url);
-          } else {
-            setTimeout(() => this.playing && this.playerDom.play(), 1);
-          }
+          setTimeout(() => {
+            if (this.playing) {
+              this.playerDom.play();
+            }
+          }, 1);
           return;
         }
         if (!this.playingUrl) {
@@ -249,14 +291,14 @@
         if (playerInfo.current > 0 && playingPlatform === '163') {
           let sourceid = (listId === 'daily' ? '' : listId) || '';
           if (!sourceid) {
-            sourceid = this.allSongs[playingId].al.id;
+            sourceid = this.allSongs[`163_${playingId}`].al.id;
           }
           // 听歌打卡
           request({
             api: 'SCROBBLE',
             data: {
               id: playingId,
-              sourceid,
+              sourceid: String(sourceid).replace(`${playingPlatform}_`, ''),
               time: Num(playerInfo.current),
             }
           })
@@ -266,67 +308,29 @@
         document.title = name;
         this.currentTime = 0;
         this.playingId = id;
-        this.playingPlatform = v.from || '163';
+        this.playingPlatform = v.platform || '163';
         this.listId = this.playingListId;
 
         // 更新后面的背景
         try {
-          document.getElementById('play-music-bg').src = `${this.allSongs[id].al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg'}?param=1440y1440`;
+          document.getElementById('play-music-bg').src = `${this.allSongs[aId].al.picUrl || 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg'}?param=1440y1440`;
         } catch (err) {
           document.getElementById('play-music-bg').src = 'http://p2.music.126.net/ftPcA5oCeIQxhiNmEpmtKw==/109951163926974610.jpg';
         }
 
         if (v.miguId && this.playing) {
-          setTimeout(() => this.playerDom.play(), 1);
+          setTimeout(() => {
+            this.playerDom.play();
+          }, 1);
         }
         // 没有歌词的拿歌词
         if (!lyric) {
-          switch (v.from) {
-            case 'qq':
-              request({
-                api: 'QQ_LYRIC',
-                data: { songmid: mid },
-              }).then((res) => {
-                const { lyric, trans } = res.data;
-                const lyricObj = {};
-                handleLyric(lyric, 'str', lyricObj);
-                handleLyric(trans, 'trans', lyricObj);
-                dispatch('updateSongDetail', { id: trueId, lyric: lyricObj });
-              });
-              break;
-            case 'migu':
-              request({
-                api: 'MIGU_LYRIC',
-                data: { cid },
-              }).then((res) => {
-                const lyricObj = {};
-                handleLyric(res.data, 'str', lyricObj);
-                dispatch('updateSongDetail', { id, lyric: lyricObj });
-              });
-              break;
-            default:
-              request({ api: 'GET_LYRIC', data: { id }, cache: true })
-                .then((res) => {
-                    const { nolyric, lrc = {}, tlyric = {} } = res;
-                    let lyric = {};
-                    if (nolyric) {
-                      lyric = {
-                        0: {
-                          str: '没有歌词哟，好好享受',
-                        },
-                      }
-                    } else {
-                      handleLyric(lrc.lyric, 'str', lyric);
-                      handleLyric(tlyric.lyric, 'trans', lyric);
-                    }
-                    dispatch('updateSongDetail', { id, lyric });
-                  });
-          }
+          queryLyric(aId);
         }
 
         // 没有评论的拿评论
         if (!comments) {
-          switch (v.from) {
+          switch (v.platform) {
             case 'qq':
               request({
                 api: 'QQ_GET_COMMENT',
@@ -338,7 +342,7 @@
                   total: res.data.comment.commenttotal,
                   offset: 20,
                 };
-                dispatch('updateSongDetail', { id: trueId, comments });
+                dispatch('updateSongDetail', { comments, aId });
               });
               break;
             case 'migu':
@@ -358,7 +362,7 @@
                   total: res.total,
                   offset: 20,
                 };
-                dispatch('updateSongDetail', { id, comments });
+                dispatch('updateSongDetail', { id, comments, aId });
               })
           }
         }
@@ -379,20 +383,23 @@
       const dispatch = this.$store.dispatch;
       window.onhashchange = () => this.showControl = !getQueryFromUrl('hideControl');
 
+      // 加载音频数据
+      if ((window.AudioContext || window.webkitAudioContext) && Storage.get('useAudioContext') !== '0') {
+        this.drawMusic = new DrawMusic();
+        const draw = () => {
+          this.drawMusic.draw();
+          window.requestAnimationFrame(draw);
+        }
+        window.requestAnimationFrame(draw);
+      }
+
       // audio加载完成
       pDom.oncanplaythrough = () => {
         if (this.playingUrl === this.playNow.pUrl) {
           dispatch('setLoading', false);
 
           if (this.playing) {
-            const playDom = () => {
-              if (!this.isReading) {
-                pDom.play();
-              } else {
-                setTimeout(() => playDom(), 500);
-              }
-            };
-            playDom();
+            pDom.play();
           }
         }
         this.playerInfo = { duration: pDom.duration, current: 0 };
@@ -400,7 +407,7 @@
       };
       // 如果不播放了可能是url过期了
       pDom.onerror = (err) => {
-        const { id } = this.playNow;
+        const { id, aId } = this.playNow;
         if (!id) {
           return;
         }
@@ -414,10 +421,10 @@
             this.cutSong('playNext');
           }
         }, 50000);
-        switch (this.playNow.from) {
+        switch (this.playNow.platform) {
           case 'qq':
           case 'migu':
-            dispatch('updateSongDetail', { id, purl: '' });
+            dispatch('updateSongDetail', { id, purl: '', aId });
             break;
           default:
             request({ api: 'SONG_URL', data: { id }})
@@ -426,10 +433,16 @@
                 if (!url) {
                   return this.cutSong('playNext');
                 }
-                dispatch('updateSongDetail', { url, br, id, pUrl: url });
+                dispatch('updateSongDetail', { url, br, id, pUrl: url, aId });
               });
         }
       };
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.setActionHandler('play', () => this.updatePlayingStatus(true));
+        navigator.mediaSession.setActionHandler('pause', () => this.updatePlayingStatus(false));
+        navigator.mediaSession.setActionHandler('previoustrack', () => this.cutSong('playPrev'));
+        navigator.mediaSession.setActionHandler('nexttrack', () => this.cutSong('playNext'));
+      }
       // audio正在加载音乐
       // pDom.onwaiting = () => console.log('waiting');
       // audio放完了
@@ -472,12 +485,12 @@
 
         switch (codes.join('-')) {
           case codeMap.VOLUME_DOWN:
-            volume = Math.max(volume - 10, 0);
+            volume = Math.max(volume - 5, 0);
             this.changeVolume(volume);
             this.$message.info(`音量调至${Num(volume, 0)}%`);
             return false;
           case codeMap.VOLUME_UP:
-            volume = Math.min(volume + 10, 100);
+            volume = Math.min(volume + 5, 100);
             this.changeVolume(volume);
             this.$message.info(`音量调至${Num(volume, 0)}%`);
             return false;
@@ -523,11 +536,15 @@
       },
       // 播放、暂停
       updatePlayingStatus(status) {
+        if (status === 'play') {
+          window.actx && window.actx.resume();
+        }
         this.playerDom[['pause', 'play'][Number(status)]]();
         this.$store.dispatch('updatePlayingStatus', status);
       },
       // 切歌。包括上一首。下一首
       cutSong(type) {
+        window.actx && window.actx.resume();
         this.$store.dispatch(type);
       },
       down: download,
@@ -535,9 +552,9 @@
       goTo(url) {
         window.location = url;
       },
-      playlistTracks(tracks, op, type, platform) {
+      playlistTracks(tracks, op, type) {
         window.event.stopPropagation();
-        this.$store.dispatch('setOperation', { data: { tracks, op }, type, platform });
+        this.$store.dispatch('setOperation', { data: { tracks, op }, type });
       },
       goBack() {
         history.back(-1);
@@ -559,6 +576,24 @@
         this.$message.success('复制链接成功，去分享吧');
       },
       changeUrlQuery,
+      handleClickMore(key) {
+        const { playNow } = this;
+        switch (key) {
+          case 'share':
+            this.copyUrl();
+            break;
+          case 'down-lyric':
+            downLyricFunc(playNow);
+            break;
+          case 'home':
+            window.location = '#/';
+            break;
+          case 'adjust':
+            this.showMore = false;
+            this.showRateSlider = true;
+            break;
+        }
+      },
     }
   }
 </script>
@@ -712,6 +747,55 @@
             }
           }
         }
+      }
+
+      .more-control {
+        display: inline-block;
+        position: relative;
+
+        .more-list-container {
+          padding-bottom: 40px;
+          position: absolute;
+          width: 60px;
+          top: -127px;
+          left: -10px;
+          z-index: 10;
+        }
+
+        .more-list {
+          position: relative;
+          padding: 4px 0;
+          border-radius: 10px;
+          border: 1px solid #eaeaea;
+          opacity: 1;
+          transition: 0.4s opacity;
+          background: rgba(255,255,255,0.4);
+          font-size: 12px;
+          color: #fff;
+
+          .iconfont {
+            font-size: 16px;
+          }
+
+          div {
+            padding: 5px 6px;
+            cursor: pointer;
+            &:hover {
+              background: rgba(255,255,255,0.3);
+            }
+          }
+        }
+      }
+
+      .rate-slider {
+        width: 100px;
+        position: absolute;
+        left: -40px;
+        background: rgba(255,255,255,0.4);
+        border: #eaeaea 1px solid;
+        padding: 0 10px;
+        border-radius: 10px;
+        bottom: 30px;
       }
 
       .volume-control {
