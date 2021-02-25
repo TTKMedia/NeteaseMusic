@@ -15,22 +15,26 @@
     </div>
 
     <div class="playlist-list hide-scroll">
-      <div v-if="!user.userId && hash === 'playlist' && !$route.query.id && selected === '163'" class="text-center fc_fff ft_20" style="padding-top: 100px;opacity: 0.8;letter-spacing: 2px;">
-        登录后可以查看个人歌单
+      <div class="input-qq mb_20" v-if="hash === 'playlist' && selected === '163'">
+        <input type="text" placeholder="官网个人主页链接中可获取id" v-model="inputNEId" />
+        <div class="update-btn" v-if="inputNEId !== neId" @click="updateNEId">更新</div>
+      </div>
+      <div v-if="!user.userId && hash === 'playlist' && !$route.query.id && !neId && selected === '163'" class="text-center fc_fff ft_20" style="padding-top: 100px;opacity: 0.8;letter-spacing: 2px;">
+        登录/输入id 后可以查看个人歌单
       </div>
       <div class="input-qq mb_20" v-if="hash === 'playlist' && selected === 'qq'">
-        <input type="text" placeholder="输入QQ号吧" v-model="inputQQ" />
+        <input type="text" placeholder="输入 QQ号/wxuin 吧" v-model="inputQQ" />
         <div class="update-btn" v-if="inputQQ !== qqId" @click="updateQQNum">更新</div>
       </div>
       <div v-if="!qqId && hash === 'playlist' && selected === 'qq'" class="text-center fc_fff ft_20" style="padding-top: 100px;opacity: 0.8;letter-spacing: 2px;">
-        输入 QQ 号可查看个人歌单
+        输入 QQ号/wxuin 可查看个人歌单
       </div>
 
       <!-- 日推-->
       <div
         v-if="allList[`${selected}_daily`] && !$route.query.id"
         :class="`playlist-item ${playingListId === `${selected}_daily` && 'playing'}`"
-        @click="goTo(`${selected}_daily`, selected)"
+        @click="goTo('daily', selected)"
       >
         <div class="list-img" style="border: 1px solid #fff5;text-align: center;">
           {{new Date().getDate()}}
@@ -83,7 +87,7 @@
             effect="dark"
             content="心动模式"
             placement="top"
-            v-if="selected === '163' && user.userId && userList['163'].favListId === item.listId"
+            v-if="selected === '163' && user.userId && userList['163'] && userList['163'].favListId === item.listId"
           >
             <i @click="toHeartMode(item.listId)" :class="`iconfont icon-heart heart-btn ${heartMode && 'hearting'}`" />
           </el-tooltip>
@@ -147,6 +151,8 @@
         selected: getQueryFromUrl('from') || Storage.get('playlist_from') || '163',
         inputQQ: Storage.get('qqId'),
         qqId: Storage.get('qqId'),
+        inputNEId: Storage.get('neId'),
+        neId: Storage.get('neId'),
       };
     },
     computed: {
@@ -196,9 +202,9 @@
       async hashChange() {
         const hashs = ['playlist', 'recommend'];
         this.hash = hashs.find((h) => document.location.hash.indexOf(h) > -1);
-        const { selected, hash, user, inputQQ } = this;
+        const { selected, hash, user, inputQQ, neId } = this;
         this.pagePlayList = [];
-        let res, id = getQueryFromUrl('id') || { 163: user.userId, qq: inputQQ }[selected];
+        let res, id = getQueryFromUrl('id') || { 163: user.userId || neId, qq: inputQQ }[selected];
         switch (hash) {
           case 'recommend':
             res = await request({
@@ -271,6 +277,12 @@
         Storage.set('qqId', inputQQ);
         this.hashChange();
       },
+      updateNEId() {
+        const { inputNEId } = this;
+        this.neId = inputNEId;
+        Storage.set('neId', inputNEId);
+        this.hashChange();
+      },
 
       numToStr,
 
@@ -285,10 +297,12 @@
     display: inline-block;
     vertical-align: top;
     height: (calc(100vh - 100px));
+    min-height: 580px;
     position: absolute;
     left: 60%;
     transform: translate(100%);
     opacity: 0;
+    top: 20px;
     transition: 0.5s;
 
     &.show {

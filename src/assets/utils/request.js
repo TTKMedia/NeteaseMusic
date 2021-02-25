@@ -25,7 +25,7 @@ axios.interceptors.response.use(data=> {
   if (url.indexOf('/api/simi/artist') > -1) {
     return window.VUE_APP.$message.warning('登录后可查看相似歌手');
   }
-  return Promise.reject(err.response.data);
+  return Promise.reject(err.response ? err.response.data : err);
 });
 
 const request = (param, platform) => {
@@ -48,7 +48,8 @@ const request = (param, platform) => {
     data,
     headers: {
       'Host-Check': btoa(timer().str('YYYYMMDD')),
-    }
+    },
+    timeout: 30000,
   }).then((res) => {
     res.data = res.data || {};
     if (res.data.code === 200 || res.data.result === 100) {
@@ -93,8 +94,8 @@ export const loginStatus = async () => {
   let func = () => (
     request({
       api: 'RECOMMEND_PLAYLIST',
-      data: { login: 0, _p: 163 },
-    }).then(({ data }) => data[0] && getPlaylist(data[0].id, '163'))
+      data: { login: 0, _p: 'qq' },
+    }).then(({ data }) => data[0] && getPlaylist(data[0].id, 'qq'))
   );
   if (res) {
     dispatch('setUser', res.profile);
@@ -103,7 +104,7 @@ export const loginStatus = async () => {
     Storage.set('uid', uid);
   }
 
-  let { songs: list, listId, id } = await func();
+  let { songs: list, listId } = await func();
   const allSongs = VUE_APP.$store.getters.getAllSongs;
   if (!shareId) {
     dispatch('updatePlayNow', allSongs[list[0]]);
@@ -149,14 +150,14 @@ export const getDaily = async (platform, retry) => {
 // 获取用户歌单
 export const getUserList = async (id, platform) => {
   let myId = '', ownCookie = 0;
+  const { VUE_APP, cookieObj = {} } = window;
   switch (platform) {
     case '163':
       myId = Storage.get('uid');
       break;
     case 'qq':
-      let uin = document.cookie.match(/\suin=([^;]+)(;|$)/);
+      myId = cookieObj.uin || '';
       ownCookie = Storage.get('haveQCookie') || '0';
-      myId = uin ? uin[1] : '';
       break;
   }
   const isMe = String(myId) === String(id);
@@ -209,12 +210,20 @@ export const getUserList = async (id, platform) => {
 // 校验 Cookie 是否过期
 export const checkCookie = async () => {
   Storage.set('haveQCookie', '0');
-  let uin = document.cookie.match(/\suin=([^;]+)(;|$)/);
-  if (uin && uin[1]) {
-    uin = uin[1].replace(/\D/g, '');
-  } else {
-    uin = null;
+  const cookieObj = {};
+  document.cookie.split(';').forEach(str => {
+    const [key, val] = str.split('=');
+    cookieObj[key.replace(/\s/g, '')] = val;
+  })
+
+  // 微信
+  if (Number(cookieObj.login_type) === 2) {
+    cookieObj.uin = cookieObj.wxuin;
   }
+  cookieObj.uin = (cookieObj.uin || '').replace(/\D/g, '');
+  window.cookieObj = cookieObj;
+
+  const { uin } = cookieObj;
   if (!uin) {
     return {
       success: false,
@@ -256,12 +265,9 @@ export const getQQInfo = async () => {
 };
 
 export const getPlaylist = async (id, platform) => {
+  const { VUE_APP } = window;
   const dispatch = VUE_APP.$store.dispatch;
   const userList = VUE_APP.$store.getters.getUserList;
-  const myId = {
-    163: Storage.get('uid'),
-    qq: Storage.get('qqId'),
-  }[platform]
   id = String(id).replace(`${platform}_`, '');
   const { data = {} } = await request({
     api: 'PLAYLIST',
@@ -269,7 +275,7 @@ export const getPlaylist = async (id, platform) => {
       id,
       _p: platform,
     }
-  });
+  }).catch(() => ({}));
 
   const songMap = {};
   data.songs = await handleSongs(data.list || [], (s) => songMap[s.aId] = 1);
@@ -340,7 +346,7 @@ export const getUrlBatch = async (id, platform) => {
       };
     }
   })
-  Object.keys(res.data).forEach((id) => {
+  Object.keys(res.data || {}).forEach((id) => {
     const aId = `${platform}_${id}`;
     delete findMap[aId];
     obj[aId] = {
@@ -379,7 +385,7 @@ export const getUrlBatch = async (id, platform) => {
 
 // 处理获取到的歌曲，把他们存到 allSongs 并获取链接
 export const handleSongs = (songs = [], func) => (
-  new Promise((resolve, reject) => {
+  new Promise((resolve) => {
     const VUE_APP = window.VUE_APP;
     const obj = {};
     const allSongs = VUE_APP.$store.getters.getAllSongs;
@@ -484,12 +490,13 @@ export const likeMusic = (id) => {
 
 // 获取高品质歌曲的
 export const getHighQualityUrl = async (id, type, updateSong) => {
+  const { VUE_APP } = window;
   const allSongs = VUE_APP.$store.getters.getAllSongs;
   const song = allSongs[id] || updateSong || {};
   if (!song.url) {
     return '';
   }
-  const idStr = (song.bId || id).replace(`${song.platform}_`, '');
+  const idStr = (song.bId || id || '').replace(`${song.platform}_`, '');
 
   let url = song.url, br = song.br || 128000, songEndType = 'mp3';
   try {
@@ -513,7 +520,6 @@ export const getHighQualityUrl = async (id, type, updateSong) => {
     console.log('获取url失败了 =.=', song.id, song.platform);
   }
 
-  url = url.replace(/^(.+)qq.com/, 'http://122.226.161.16/amobile.music.tc.qq.com');
   url = url.replace('freetyst.nf.migu.cn', `${window.location.host}/miguSongs`);
 
   if (updateSong) {
@@ -533,6 +539,7 @@ export const getHighQualityUrl = async (id, type, updateSong) => {
 // 下载
 export const download = async (id, songName, forceReq, defaultSong) => {
   window.event && window.event.stopPropagation();
+  const { VUE_APP } = window;
   const allSongs = VUE_APP.$store.getters.getAllSongs;
   const song = defaultSong || allSongs[id];
   const dispatch = VUE_APP.$store.dispatch;
@@ -566,7 +573,11 @@ export const download = async (id, songName, forceReq, defaultSong) => {
 
   downReq(url, name, null, song, {
     init: (ajax) => {
-      VUE_APP.$message.success('加入下载中');
+      if (url.indexOf('qq.com') > -1) {
+        VUE_APP.$message.warning('企鹅音乐受官方新增的跨域限制可能存在无法下载');
+      } else {
+        VUE_APP.$message.success('加入下载中');
+      }
       dispatch('updateDownload', { status: 'init', from: (song.from || '163'), id: downId, ajax, name, songId: id, br, songCid, song, });
     },
     success: () => {
@@ -581,6 +592,7 @@ export const download = async (id, songName, forceReq, defaultSong) => {
 };
 
 export const downLyricFunc = async (obj) => {
+  const { VUE_APP } = window;
   await queryLyric(obj.aId);
   const allSongs = VUE_APP.$store.getters.getAllSongs;
   const song = allSongs[obj.aId] || obj;
@@ -657,7 +669,13 @@ export const handleQQComments = (list) => (list || []).map((obj) => ({
 
 // 从服务器获取 Cookie
 export const getCookie = async (id) => {
+  const { VUE_APP } = window;
   Storage.set('qqId', id);
+
+  const exp = new Date();
+  exp.setTime(exp.getTime() - 1);
+  document.cookie = "login_type=1;expires=" + exp.toGMTString();
+
   const res = await request({
     api: 'QQ_GET_COOKIE',
     data: {
@@ -676,6 +694,7 @@ export const getCookie = async (id) => {
 
 // 收藏/取消收藏 歌单
 export const collectPlaylist = async ({ platform, id, listId }) => {
+  const { VUE_APP } = window;
   window.event.stopPropagation();
   const userList = VUE_APP.$store.getters.getUserList;
   if (!userList[platform]) {
@@ -726,6 +745,7 @@ export const collectPlaylist = async ({ platform, id, listId }) => {
 };
 
 export const queryLyric = async (aId) => {
+  const { VUE_APP } = window;
   const allSongs = VUE_APP.$store.getters.getAllSongs;
   const song = allSongs[aId];
   const { id, mid, cId, platform } = song;

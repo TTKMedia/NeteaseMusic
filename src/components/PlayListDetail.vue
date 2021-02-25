@@ -16,8 +16,9 @@
             >
               <i @click="collectPlaylist(listInfo)" :class="`collect-btn mr_10 iconfont icon-${userList[platform].sub[listId] ? 'collected' : 'collect'}`" />
             </el-tooltip>
-            <span>By <span class="creator-name">{{listInfo.creator.nick}}</span></span>
+            <span v-if="listInfo.creator">By <span class="creator-name">{{listInfo.creator.nick}}</span></span>
           </div>
+          <div class="list-desc">{{listInfo.desc}}</div>
         </div>
       </div>
       <div>
@@ -40,14 +41,14 @@
         </el-tooltip>
       </div>
     </div>
-    <div class="song-list" v-if="allList[listId] || id === 'playing'">
+    <div class="song-list" v-if="list.length">
       <div :style="`height:${smallIndex*71}px;`"></div>
       <div
         :class="`song-item ${playNow.aId === s ? 'played' : ''} ${!allSongs[s].url ? 'disabled' : ''} ${((i < smallIndex) || (i > bigIndex)) ? 'hidden' : ''}`"
         v-for="(s, i) in list"
         v-if="allSongs[s] && i >= smallIndex && i <= bigIndex"
         :key="`${s}-${i}`"
-        @click="playMusic(s, list, listId)"
+        @click="playMusic({ id: s, arr: trueList, listId, isDetail: true })"
       >
         <div class="playing-bg" v-if="playNow.aId === s" :style="`width: ${playingPercent * 100}%`">
           <div class="wave-bg"></div>
@@ -56,13 +57,18 @@
         <span class="song-order">{{i+1}}</span>
         <img class="song-cover" :src="`${allSongs[s].al && allSongs[s].al.picUrl}?param=50y50`" alt="" />
         <span class="song-name">{{allSongs[s].name}}</span>
+        <el-tooltip class="item" effect="dark" content="mv" placement="top">
+          <a :href="changeUrlQuery({ id: allSongs[s].mvId, from: allSongs[s].platform }, '#/mv', false)" class="song-mv iconfont icon-mv" v-if="allSongs[s].mvId"></a>
+        </el-tooltip>
         <span class="song-artist">{{(allSongs[s].ar || []).map((a) => a.name).join('/')}}</span>
         <div class="icon-container">
-          <i
-            v-if="userList[allSongs[s].platform] && (listId !== userList[allSongs[s].platform].favListId)"
-            @click="likeMusic(s)"
-            :class="`operation-icon operation-icon-1 iconfont icon-${!!favSongMap[allSongs[s].platform][s] ? 'like' : 'unlike'}`"
-          />
+          <el-tooltip class="item" effect="dark" content="喜欢" placement="top">
+            <i
+              v-if="userList[allSongs[s].platform] && (listId !== userList[allSongs[s].platform].favListId)"
+              @click="likeMusic(s)"
+              :class="`operation-icon operation-icon-1 iconfont icon-${!!favSongMap[allSongs[s].platform][s] ? 'like' : 'unlike'}`"
+            />
+          </el-tooltip>
           <el-tooltip class="item" effect="dark" content="添加到歌单" placement="top">
             <i
               v-if="allSongs[s].from !== 'migu'"
@@ -93,8 +99,8 @@
           </el-tooltip>
           <el-tooltip class="item" effect="dark" content="从歌单中删除" placement="top">
             <i
-              @click="playlistTracks(s, listId, 'del', 'DEL_SONG')"
-              v-if="userList[allSongs[s].platform] && userList[allSongs[s].platform].mine && userList[allSongs[s].platform].mine[listId]"
+              @click="playlistTracks(s, aId, 'del', 'DEL_SONG')"
+              v-if="isMineList"
               class="operation-icon operation-icon-5 iconfont icon-delete"
             />
           </el-tooltip>
@@ -104,54 +110,65 @@
       <div class="focus-btn" v-if="list.indexOf(playNow.aId) > -1" @click="scrollToPlayNow">
         <i class="iconfont icon-focus" />
       </div>
+      <div class="clear-btn" v-if="id === 'playing' && playNow && list.length > 1" @click="clearPlaying">
+        <i class="iconfont icon-delete" />
+      </div>
     </div>
   </div>
 </template>
 
 <script>
-  import { getQueryFromUrl } from "../assets/utils/stringHelper";
   import {
-    getPlaylist,
     likeMusic,
     download,
     collectPlaylist,
   } from "../assets/utils/request";
   import { mapGetters } from 'vuex';
-  import Storage from "../assets/utils/Storage";
   import { handlePlayingList } from "../assets/utils/util";
+  import { changeUrlQuery } from "../assets/utils/stringHelper";
 
   export default {
     name: "PlayListDetail",
     data() {
       return {
-        id: getQueryFromUrl('id'),
-        listId: '',
         search: '',
         list: [],
-        listInfo: null,
-        loading: true,
-        platform: getQueryFromUrl('from') || '163',
         smallIndex: 0,
         bigIndex: 0,
-        qqId: Storage.get('qqId'),
         showScrollTo: false,
       }
     },
+    props: {
+      id: String,
+      listId: String,
+      platform: String,
+      loading: Boolean,
+      listInfo: Object,
+      trueList: Array,
+    },
     computed: {
       ...mapGetters({
+        allList: 'getAllList',
         playingList: 'getPlayingList',
         userList: 'getUserList',
         qUserList: 'getQUserList',
-        allList: 'getAllList',
         allSongs: 'getAllSongs',
         playNow: 'getPlaying',
         user: 'getUser',
         playingPercent: 'getPlayingPercent',
         favSongMap: 'getFavSongMap',
-      })
+      }),
+      aId() {
+        return `${this.platform}_${this.id}`;
+      },
+      isMineList() {
+        const { platform, userList, aId } = this;
+        return !!(userList[platform] && userList[platform].mine && userList[platform].mine[aId]);
+
+      }
     },
     watch: {
-      allList() {
+      trueList() {
         this.searchList();
       },
       list() {
@@ -160,50 +177,13 @@
       search() {
         this.searchList();
       },
-      $route(){
-        this.platform = this.$route.query.from || '163';
-        this.id = this.$route.query.id.replace(`${this.platform}_`, '');
-        this.listId = `${this.platform}_${this.id}`;
-        this.init();
-      },
-      playingList: {
-        handler() {
-          if (this.id === 'playing') {
-            this.init();
-          }
-        },
-        deep: true,
-      },
     },
     created() {
-      const { allList, id, userList, platform } = this;
-      this.id = String(id).replace(`${platform}_`, '');
-      this.listId = `${platform}_${this.id}`;
-      this.list = allList[this.listId] || [];
-      this.init();
+      if (this.trueList.length) {
+        this.searchList();
+      }
     },
     methods: {
-      async init() {
-        const { id, platform, qUserList, list } = this;
-        this.loading = false;
-        if (id === 'playing') {
-          this.listInfo = null;
-          return this.list = this.playingList.trueList || [];
-        }
-        const listId = this.listId = `${platform}_${id}`;
-        if (listId === `${platform}_daily`) {
-          this.listInfo = null;
-          return this.list = this.allList[listId] || [];
-        }
-        this.loading = true;
-        const listInfo = await getPlaylist(id, platform);
-        if (!listInfo) {
-          return this.$message.error('获取歌单信息出错！');
-        }
-        this.listInfo = listInfo;
-        this.songs = this.listInfo.songs;
-        this.loading = false;
-      },
       playListShow(playing) {
         const { allSongs, list, listId } = this;
         const { dispatch } = this.$store;
@@ -240,21 +220,9 @@
 
       },
       searchList() {
-        const { search, allList, listId, id, allSongs, platform } = this;
+        const { search, trueList, allSongs } = this;
         const rex = search.replace(/\/|\s|\t|,|，|-|/g, '').toLowerCase();
-        let rawList = [];
-        switch (listId) {
-          case `${platform}_playing`:
-            rawList = this.playingList.trueList;
-            break;
-          case `${platform}_${id}`:
-            rawList = this.allList[listId];
-            break;
-          default:
-            rawList = allList[id];
-            break;
-        }
-        rawList = rawList || [];
+        const rawList = trueList || [];
         if (!rex) {
           this.showScrollTo = rawList.indexOf(this.playNow.aId) !== -1;
           return this.list = rawList;
@@ -280,21 +248,26 @@
       download,
       collectPlaylist,
       getShowIndex() {
+        const { list } = this;
         const dom = document.getElementsByClassName('list-detail-container')[0];
         const smallHeight = Math.max(dom.scrollTop - 500, 0);
         this.smallIndex = Math.floor(smallHeight / 71);
         const bigHeight = dom.clientHeight + dom.scrollTop + 300;
-        this.bigIndex = Math.floor(bigHeight / 71);
+        this.bigIndex = Math.min(Math.floor(bigHeight / 71), list.length);
       },
       scrollToPlayNow() {
         const { list, playNow } = this;
-        const index = this.list.findIndex((v) => v === playNow.aId);
+        const index = list.findIndex((v) => v === playNow.aId);
         const domL = document.getElementsByClassName('song-list')[0];
         if (index > -1) {
           document.getElementsByClassName('list-detail-container')[0].scrollTo(0, index * 71 + domL.offsetTop);
         }
       },
       ...handlePlayingList,
+      changeUrlQuery,
+      clearPlaying() {
+        this.$store.dispatch('updatePlayingList', { list: [ this.playNow.aId ]});
+      }
     }
   }
 </script>
@@ -305,15 +278,30 @@
     position: absolute;
     right: 0;
     height: calc(100% - 20px);
+    min-height: 580px;
     top: 20px;
     overflow-y: auto;
     background: #0001;
     border-left: 1px solid #fff5;
 
     &::-webkit-scrollbar {
-      width: 0;
+      width: 8px;
       height:8px;
       background-color:rgba(0,0,0,0);
+    }
+    /*定义滚动条轨道
+       内阴影+圆角*/
+    &::-webkit-scrollbar-track
+    {
+      border-radius: 10px;
+      background-color: rgba(255,255,255,0);
+    }
+    /*定义滑块
+     内阴影+圆角*/
+    &::-webkit-scrollbar-thumb
+    {
+      border-radius:10px;
+      background-color:rgba(255,255,255,0.5);
     }
 
     .list-info-detail {
@@ -357,6 +345,24 @@
             opacity: 1;
           }
         }
+
+        .list-desc {
+          display: -webkit-box;
+          overflow: hidden;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          transition: 0.4s;
+          max-height: 44px;
+          margin-top: 5px;
+          font-size: 14px;
+          opacity: 0.8;
+
+          &:hover {
+            max-height: 220px;
+            -webkit-line-clamp: 10;
+            opacity: 1;
+          }
+        }
       }
 
       .search-input {
@@ -382,12 +388,12 @@
       padding-right: 20px;
       position: relative;
 
-      .focus-btn {
+      .focus-btn, .clear-btn {
         position: fixed;
-        bottom: 120px;
-        right: 40px;
-        width: 50px;
-        height: 50px;
+        bottom: 90px;
+        right: 20px;
+        width: 40px;
+        height: 40px;
         border-radius: 50%;
         background: #F23C3C;
         border: 2px solid #F23C3C;
@@ -401,15 +407,19 @@
         text-align: center;
 
         .iconfont {
-          font-size: 28px;
+          font-size: 24px;
           color: #fff;
-          line-height: 50px;
+          line-height: 40px;
         }
 
         &:hover {
           opacity: 0.7;
         }
 
+      }
+
+      .clear-btn {
+        bottom: 145px;
       }
 
       .song-item {
@@ -445,7 +455,7 @@
           opacity: 1;
           box-shadow: 0 0 10px #0003;
           border-bottom: 1px solid transparent;
-          
+
           &.played {
             .song-order {
               color: #409EFF80;
@@ -459,22 +469,27 @@
           .song-artist {
             transform: translate(90px);
           }
-          
+
           .song-order {
             color: #fff5;
             transform: translate(0, 10px);
+            user-select: none;
           }
 
           .song-cover {
             filter: blur(5px);
             opacity: 0.4;
             transform: rotate(-30deg) scale(2) translate(0, 10px);
+            user-select: none;
           }
 
           .song-name {
             font-weight: bold;
             transform: scale(1.22) translate(75px);
             color: #fff;
+          }
+          .song-mv {
+            transform: translateX(170px);
           }
 
           .icon-container {
@@ -505,6 +520,7 @@
           filter: blur(0);
           transform: rotate(0) scale(1) translate(65px, 10px);
           transition: 0.4s;
+          user-select: none;
         }
 
         .song-name {
@@ -520,6 +536,14 @@
           color: #fff;
           font-weight: normal;
           transition: 0.3s
+        }
+
+        .song-mv {
+          position: absolute;
+          top: 45px;
+          left: 150px;
+          transform: translateX(0);
+          transition: 0.3s;
         }
 
         .song-artist {

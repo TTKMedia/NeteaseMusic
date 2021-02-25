@@ -95,17 +95,30 @@ export const messageHelp = (id) => {
     {
       content: 'MV 回归 & 歌单详情长列表性能优化 & 音量调节改为单次5%',
       time: '20-09-18',
+    },
+    {
+      content: '支持左侧显示歌词（前往设置） & cookie 支持微信',
+      time: '20-11-06'
+    },
+    {
+      content: '受企鹅修改跨域限制影响，取消先进模式 & 音频图',
+      time: '20-11-30'
+    },
+    {
+      content: '优化先进模式（网易云恢复音频图 & 新增清空正在播放列表',
+      time: '20-12-06'
+    },
+    {
+      content: '估计服务器IP被网易云封禁（换过一次了，很快又被封了），登录/收藏等接口失效，兼容方案为，歌单页支持用户输入id获取用户歌单',
+      time: '20-12-28'
     }
   ];
   if (id === 'newInfo') {
     const newInfoIndex = Number(Storage.get('notify-new-index') || 0);
-    if (newInfoIndex < 10) {
-      setTimeout(() => playingNotify(), 2000);
-    }
     if (newInfoIndex < (newMessage.length - 1)) {
       Storage.set('notify-new-index', newMessage.length - 1);
       window.VUE_APP.$notify({
-        title: '有更新呀！',
+        title: '更新记录！',
         message: newMessage.slice(newInfoIndex + 1).map((v) => `${v.content} (${v.time})`).slice(-3).join('<br/>'),
         duration: (newMessage.length - newInfoIndex) * 20000,
         dangerouslyUseHTMLString: true,
@@ -121,7 +134,7 @@ export const messageHelp = (id) => {
 };
 
 export const handlePlayingList = {
-  playMusic: (id, arr, listId) => {
+  playMusic: ({id, arr, listId, isDetail = false}) => {
     const { allSongs, allList, playingList } = window.VUE_APP.$store.state;
     const { dispatch } = window.VUE_APP.$store;
     const song = allSongs[id];
@@ -136,7 +149,7 @@ export const handlePlayingList = {
     dispatch('updatePlayNow', song);
     dispatch('updatePlayingStatus', true);
     let updateData;
-    if (listId) {
+    if (isDetail) {
       // 歌单详情页
       if (Number(Storage.get('PLAY_MUSIC_FROM_PLAYLIST'))) {
         updateData = { list, listId };
@@ -151,6 +164,9 @@ export const handlePlayingList = {
         updateData = { list: [id], more: true };
       }
     }
+    setTimeout(() => {
+      window.pDom.play();
+    });
 
     dispatch('updatePlayingList', updateData);
   },
@@ -186,12 +202,4 @@ export const handlePlayingList = {
     dispatch('updatePlayingList', { list: playingList.raw.filter((s) => s !== id)});
     $message.success('移出播放列表！');
   }
-}
-
-export const playingNotify = () => {
-  window.VUE_APP.$notify({
-    title: '【重要更新】',
-    message: '由于对正在播放列表的逻辑调整，现在点击歌曲可支持 播放当前列表 & 仅将点击歌曲加入播放列表，可前往设置页修改',
-    duration: 1000000,
-  })
 }

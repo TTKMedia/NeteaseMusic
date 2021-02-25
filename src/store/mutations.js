@@ -2,7 +2,6 @@ import * as types from './mutationsTypes';
 import Storage from "../assets/utils/Storage";
 import ArrHelper from '../assets/utils/arrayHelper';
 import Num from '../assets/utils/num';
-import de from "element-ui/src/locale/lang/de";
 
 export default {
   [types.SET_OPERATION](state, data) {
@@ -68,11 +67,11 @@ export default {
     data.dissid && (state.sysSongs[data.dissid] = state.showList);
   },
   [types.UPDATE_ALL_SONGS](state, data) {
-    const { allSongs, playNow, playingList } = state;
-    const { platform, aId } = playNow;
+    const { playNow = {}, playingList } = state;
+    const { aId } = playNow;
     state.allSongs = { ...state.allSongs, ...data };
-    if (playNow.aId && JSON.stringify(playNow) !== JSON.stringify(allSongs[aId])) {
-      state.playNow = allSongs[aId];
+    if (aId && JSON.stringify(playNow) !== JSON.stringify(state.allSongs[aId])) {
+      state.playNow = state.allSongs[aId];
     }
     if (ArrHelper.hasDuplicate(Object.keys(data), playingList.raw.join(',').split(','))) {
       playingList.trueList = playingList.raw.filter((aId) => state.allSongs[aId] && (state.allSongs[aId].pUrl));
@@ -120,7 +119,7 @@ export default {
   ,
   // 下一首
   [types.PLAY_NEXT](state) {
-    const { playingList, allSongs, playNow } = state;
+    const { playingList, allSongs, playNow = {} } = state;
     const orderType = Storage.get('orderType');
     const { history, index, trueList, random } = playingList;
     const { aId } = playNow;
@@ -128,7 +127,7 @@ export default {
     if (index < history.length - 1) {
       return state.playNow = allSongs[history[playingList.index]];
     }
-    if (playingList.history[playingList.history.length-1] !== aId) {
+    if (aId && playingList.history[playingList.history.length-1] !== aId) {
       playingList.history.push(aId);
     }
 
@@ -148,12 +147,18 @@ export default {
         if (i === (trueList.length - 1) || i === 0) {
           window.VUE_APP.$store.dispatch('updateRandomList');
         }
+        if (!allSongs[random[i]]) {
+          return;
+        }
         return state.playNow = allSongs[random[i]];
       default:
         i = trueList.indexOf(aId);
         i += 1;
         if (i === trueList.length) {
           i = 0;
+        }
+        if (!allSongs[trueList[i]]) {
+          return;
         }
         return state.playNow = allSongs[trueList[i]];
     }
@@ -195,8 +200,8 @@ export default {
   },
   // 更新正在播放的音乐
   [types.UPDATE_PLAY_NOW](state, data) {
-    const { playingList, playNow, isPersonFM } = state;
-    if (!data) {
+    const { playingList, playNow } = state;
+    if (!data || !data.aId) {
       return;
     }
     if (playNow.aId) {
@@ -228,6 +233,9 @@ export default {
     const arr = [ ...playingList.trueList ];
     const map = {};
     let temp;
+    if (!playNow) {
+      return;
+    }
     // 保证当前歌曲第一个，剩下歌曲随机顺序
     const length = arr.length;
     for (let i = length - 1; i > 1; i--) {
@@ -235,8 +243,8 @@ export default {
       temp = arr[r];
       arr[r] = arr[i];
       arr[i] = temp;
-      map[temp] = true;
     }
+    arr.forEach((k) => map[k] = true);
     const nowI = arr.indexOf(playNow.aId);
     if (nowI >= 0) {
       temp = arr[0];
@@ -380,5 +388,14 @@ export default {
       ...state.favSongMap,
       ...data,
     }
+  },
+  [types.UPDATE_TOP_INFO](state, data) {
+    state.topInfo = {
+      ...state.topInfo,
+      ...data,
+    }
+  },
+  [types.SET_HOME_TYPE](state, data) {
+    state.homeType = data;
   }
 }

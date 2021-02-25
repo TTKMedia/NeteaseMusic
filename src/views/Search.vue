@@ -222,7 +222,6 @@
         const viewH = el.height(); // 可见高度
         const contentH = el.get(0).scrollHeight; // 内容高度
         const scrollTop = el.scrollTop(); // 滚动高度
-        console.log(contentH - viewH - scrollTop, 150, pageNo * 30, total)
         if (contentH - viewH - scrollTop < 150 && pageNo * 30 < total && !loading) {
           this.search('pageNo', pageNo + 1);
         }
@@ -296,6 +295,7 @@
   .search-page-container {
     position: absolute;
     height: calc(100% - 30px);
+    min-height: 580px;
     width: 38%;
     background: #0003;
     transition: 0.3s;

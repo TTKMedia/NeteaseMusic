@@ -58,4 +58,12 @@ export default {
     163: {},
     qq: {},
   },
+  topInfo: {
+    platform: Storage.get('playlist_from') || '163',
+    '163id': '',
+    'qqid': '',
+    '163List': [],
+    'qqList': [],
+  },
+  homeType: Storage.get('showHomeType') || 'info',
 };
